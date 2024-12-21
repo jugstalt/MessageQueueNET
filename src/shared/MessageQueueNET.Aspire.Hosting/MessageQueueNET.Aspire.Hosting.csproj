@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	  <LangVersion>12</LangVersion>
+  </PropertyGroup>
+
+	<PropertyGroup>
+		<AssemblyName>MessageQueueNET.Aspire.Hosting</AssemblyName>
+		<Version>3.24.5101</Version>
+		<Copyright>2024, Jürgen Gstaltmaier</Copyright>
+		<PackageProjectUrl>https://github.com/jugstalt/MessageQueueNET</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/jugstalt/MessageQueueNET</RepositoryUrl>
+		<Authors>Jürgen Gstaltmaier</Authors>
+		<Company />
+		<Product />
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+	</PropertyGroup>	
+	
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

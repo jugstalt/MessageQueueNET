@@ -41,7 +41,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "aspire", "aspire", "{FD2DA0
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MessageQueueNET.Aspire", "src\shared\MessageQueueNET.Aspire\MessageQueueNET.Aspire.csproj", "{53A24CA0-3856-40E5-82DA-F7D5679A0FD5}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.Hosting.MessageQueueNET", "src\shared\Aspire.Hosting.MessageQueueNET\Aspire.Hosting.MessageQueueNET.csproj", "{BBC5CE1E-1A51-4068-A929-F20DBBD90BB5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MessageQueueNET.Aspire.Hosting", "src\shared\MessageQueueNET.Aspire.Hosting\MessageQueueNET.Aspire.Hosting.csproj", "{BBC5CE1E-1A51-4068-A929-F20DBBD90BB5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

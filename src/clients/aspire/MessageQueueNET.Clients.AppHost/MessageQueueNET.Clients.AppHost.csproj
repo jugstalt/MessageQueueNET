@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <Sdk Name="Aspire.AppHost.Sdk" Version="9.0.0-rc.1.24511.1" />
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,9 +9,9 @@
     <UserSecretsId>979f20b2-a8ba-4f4d-a93f-50fc26553dfc</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.0.0-rc.1.24511.1" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\shared\Aspire.Hosting.MessageQueueNET\Aspire.Hosting.MessageQueueNET.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\..\shared\MessageQueueNET.Aspire.Hosting\MessageQueueNET.Aspire.Hosting.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 </Project>

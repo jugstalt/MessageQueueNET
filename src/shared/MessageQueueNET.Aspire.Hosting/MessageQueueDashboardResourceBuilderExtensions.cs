@@ -9,8 +9,7 @@ static public class MessageQueueDashboardResourceBuilderExtensions
             string name,
             int? httpPort = null,
             int? httpsPort = null,
-            string? imageTag = null,
-            string? bridgeNetwork = null
+            string? imageTag = null
         )
     {
         var resource = new MessageQueueDashboardResource(name);

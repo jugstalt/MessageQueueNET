@@ -1,4 +1,5 @@
 ﻿using Aspire.Hosting.ApplicationModel;
+using Humanizer.Localisation;
 
 namespace Aspire.Hosting;
 
@@ -18,8 +19,7 @@ static public class MessageQueueResourceBuilderExtensions
         var resourceBuilder = builder.AddResource(resource)
                     .WithImage(MessageQueueContainerImageTags.Image)
                     .WithImageRegistry(MessageQueueContainerImageTags.Registry)
-                    .WithImageTag(imageTag ?? MessageQueueContainerImageTags.Tag)
-                    .WithContainerRuntimeArgs("--name", resource.ContainerName)
+                    .WithImageTag(imageTag ?? MessageQueueContainerImageTags.Tag) 
                     .WithEnvironment(e =>
                     {
                         e.EnvironmentVariables.Add("SWAGGERUI", "true");
@@ -66,6 +66,22 @@ static public class MessageQueueResourceBuilderExtensions
                 "/home/app/messagequeue",
                 isReadOnly: false
              );
+
+        return builder;
+    }
+
+    public static IResourceBuilder<MessageQueueResource> WithContainerName(
+        this IResourceBuilder<MessageQueueResource> builder,
+        string containerName)
+    {
+        builder.Resource.ContainerName = containerName;
+
+        return builder;
+    }
+
+    public static IResourceBuilder<MessageQueueResource> Build(this IResourceBuilder<MessageQueueResource> builder)
+    {
+        builder.WithContainerRuntimeArgs("--name", builder.Resource.ContainerName);
 
         return builder;
     }
