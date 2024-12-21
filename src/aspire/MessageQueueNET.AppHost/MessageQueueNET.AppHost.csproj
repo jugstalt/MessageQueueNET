@@ -9,7 +9,7 @@
     <UserSecretsId>103de6cf-4ac0-4923-80b0-ae1ce7251d73</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.0.0-rc.1.24511.1" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\backend\MessageQueueNET\MessageQueueNET.csproj" />
