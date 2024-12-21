@@ -1,4 +1,5 @@
-﻿using MessageQueueNET.Client.Extensions;
+﻿using MessageQueueNET.Client.Abstractions;
+using MessageQueueNET.Client.Extensions;
 using MessageQueueNET.Client.Models;
 using MessageQueueNET.Client.Models.Authentication;
 using System;
@@ -12,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace MessageQueueNET.Client;
 
-public class QueueClient
+public class QueueClient : IQueueClient
 {
     private static HttpClient ReuseableHttpClient = new HttpClient();
     private static string ClientId = $"{Environment.GetEnvironmentVariable("COMPUTERNAME")}-{Guid.NewGuid():N}";
