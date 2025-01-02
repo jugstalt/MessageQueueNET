@@ -33,12 +33,20 @@ static public class MessageQueueDashboardResourceBuilderExtensions
     {
         builder.ResourceBuilder.WithEnvironment(e =>
         {
-            e.EnvironmentVariables.Add($"DASHBOARD__QUEUES__{builder.QueueIndex}__NAME", name);
-            e.EnvironmentVariables.Add(
-                $"DASHBOARD__QUEUES__{builder.QueueIndex}__URL",
-                $"http://{messageQueue.Resource.ContainerName}:{messageQueue.Resource.ContainerHttpPort}"
-                );
-            e.EnvironmentVariables.Add($"DASHBOARD__QUEUES__{builder.QueueIndex}__FILTER", filter);
+            if (messageQueue.Resource.TryGetAnnotationsOfType<ContainerNameAnnotation>(out var nameAnnotations))
+            {
+                e.EnvironmentVariables.Add($"DASHBOARD__QUEUES__{builder.QueueIndex}__NAME", name);
+                e.EnvironmentVariables.Add(
+                    $"DASHBOARD__QUEUES__{builder.QueueIndex}__URL",
+                    $"http://{nameAnnotations.First().Name}:{messageQueue.Resource.ContainerHttpPort}"
+                    );
+
+                e.EnvironmentVariables.Add($"DASHBOARD__QUEUES__{builder.QueueIndex}__FILTER", filter);
+            } 
+            else
+            {
+                // Error handling?
+            }
 
             builder.QueueIndex++;
         });

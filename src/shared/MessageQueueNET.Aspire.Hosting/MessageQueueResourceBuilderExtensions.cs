@@ -19,7 +19,11 @@ static public class MessageQueueResourceBuilderExtensions
         var resourceBuilder = builder.AddResource(resource)
                     .WithImage(MessageQueueContainerImageTags.Image)
                     .WithImageRegistry(MessageQueueContainerImageTags.Registry)
-                    .WithImageTag(imageTag ?? MessageQueueContainerImageTags.Tag) 
+                    .WithImageTag(imageTag ?? MessageQueueContainerImageTags.Tag)
+                    .WithAnnotation(new ContainerNameAnnotation { 
+                            Name = $"{name}-{Convert.ToBase64String(Guid.NewGuid().ToByteArray()).ToLower().Replace("=", "").Replace("+", "").Replace("/", "")}"
+                        }, 
+                        ResourceAnnotationMutationBehavior.Replace)
                     .WithEnvironment(e =>
                     {
                         e.EnvironmentVariables.Add("SWAGGERUI", "true");
@@ -70,18 +74,18 @@ static public class MessageQueueResourceBuilderExtensions
         return builder;
     }
 
-    public static IResourceBuilder<MessageQueueResource> WithContainerName(
-        this IResourceBuilder<MessageQueueResource> builder,
-        string containerName)
-    {
-        builder.Resource.ContainerName = containerName;
+    //public static IResourceBuilder<MessageQueueResource> WithContainerName(
+    //    this IResourceBuilder<MessageQueueResource> builder,
+    //    string containerName)
+    //{
+    //    builder.Resource.ContainerName = containerName;
 
-        return builder;
-    }
+    //    return builder;
+    //}
 
     public static IResourceBuilder<MessageQueueResource> Build(this IResourceBuilder<MessageQueueResource> builder)
     {
-        builder.WithContainerRuntimeArgs("--name", builder.Resource.ContainerName);
+        //builder.WithContainerRuntimeArgs("--name", builder.Resource.ContainerName);
 
         return builder;
     }
