@@ -9,8 +9,8 @@
 
 	<PropertyGroup>
 		<AssemblyName>MessageQueueNET.Aspire.Hosting</AssemblyName>
-		<Version>3.25.101</Version>
-		<Copyright>2024, Jürgen Gstaltmaier</Copyright>
+		<Version>3.25.3701</Version>
+		<Copyright>2025, Jürgen Gstaltmaier</Copyright>
 		<PackageProjectUrl>https://github.com/jugstalt/MessageQueueNET</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/jugstalt/MessageQueueNET</RepositoryUrl>
 		<Authors>Jürgen Gstaltmaier</Authors>

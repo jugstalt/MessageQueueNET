@@ -32,84 +32,91 @@ internal class MessageQueueAppTopicHandlerBackgroundService : BackgroundService
 
     async protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (String.IsNullOrEmpty(_options.MessageQueueApiUrl))
+        try
         {
-            throw new Exception("No MessageQueueApiUrl defined");
-        }
-
-        var connection = _options.ToConnection();
-
-        if (_options.ManageQueueLifetimeCycle)
-        {
-            var client = await _clientService.CreateClient(connection, _options.ToQueueName());
-            await client.RegisterAsync(
-                        lifetimeSeconds: _options.QueueLifetimeSeconds,
-                        itemLifetimeSeconds: _options.ItemLifetimeSeconds 
-                    );
-        }
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
+            if (String.IsNullOrEmpty(_options.MessageQueueApiUrl))
             {
-                var queueFilter = _options.ToTopicQueuesFilter();
+                throw new Exception("No MessageQueueApiUrl defined");
+            }
 
-                await foreach (var messagesResult in _clientService.GetNextMessages(
-                            connection, 
-                            queueFilter, 
-                            stoppingToken,
-                            maxPollingSeconds: _options.MaxPollingSeconds
-                        )
-                    )
+            var connection = _options.ToConnection();
+
+            if (_options.ManageQueueLifetimeCycle)
+            {
+                var client = await _clientService.CreateClient(connection, _options.ToQueueName());
+                await client.RegisterAsync(
+                            lifetimeSeconds: _options.QueueLifetimeSeconds,
+                            itemLifetimeSeconds: _options.ItemLifetimeSeconds
+                        );
+            }
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
                 {
-                    if (messagesResult.Messages?.Any() != true)
-                    {
-                        continue;
-                    }
+                    var queueFilter = _options.ToTopicQueuesFilter();
 
-                    foreach (var messageResult in messagesResult.Messages)
+                    await foreach (var messagesResult in _clientService.GetNextMessages(
+                                connection,
+                                queueFilter,
+                                stoppingToken,
+                                maxPollingSeconds: _options.MaxPollingSeconds
+                            )
+                        )
                     {
-                        try
+                        if (messagesResult.Messages?.Any() != true)
                         {
-                            if (messageResult?.Value?.Contains(":") != true)
-                            {
-                                continue;
-                            }
-
-                            (string commandName, string commandMessage)
-                                = messageResult.Value.SplitByFirst(':');
-
-                            using (var scope = _serviceScopeFactory.CreateScope())
-                            {
-                                var messageHandler = scope.ServiceProvider.GetKeyedService<IMessageHandler>(commandName);
-
-                                if (messageHandler is null)
-                                {
-                                    _logger.LogWarning("MessageHandler (Command={messageHandlerCommand}) is not a registered service", commandName);
-                                }
-                                else
-                                {
-                                    await messageHandler.InvokeAsync(commandMessage);
-                                }
-                            }
+                            continue;
                         }
-                        catch (Exception ex)
+
+                        foreach (var messageResult in messagesResult.Messages)
                         {
-                            _logger.LogWarning("Error in handling message {messageResult}: {exceptionMessage}", messageResult?.Value ?? "", ex.Message);
+                            try
+                            {
+                                if (messageResult?.Value?.Contains(":") != true)
+                                {
+                                    continue;
+                                }
+
+                                (string commandName, string commandMessage)
+                                    = messageResult.Value.SplitByFirst(':');
+
+                                using (var scope = _serviceScopeFactory.CreateScope())
+                                {
+                                    var messageHandler = scope.ServiceProvider.GetKeyedService<IMessageHandler>(commandName);
+
+                                    if (messageHandler is null)
+                                    {
+                                        _logger.LogWarning("MessageHandler (Command={messageHandlerCommand}) is not a registered service", commandName);
+                                    }
+                                    else
+                                    {
+                                        await messageHandler.InvokeAsync(commandMessage);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning("Error in handling message {messageResult}: {exceptionMessage}", messageResult?.Value ?? "", ex.Message);
+                            }
                         }
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Exception in BackgroundService Loop: {message}", ex.Message);
+                }
             }
-            catch (Exception ex)
+
+            if (_options.ManageQueueLifetimeCycle)
             {
-                _logger.LogError("Exception in BackgroundService: {message}", ex.Message);
+                var client = await _clientService.CreateClient(connection, _options.ToQueueName());
+                await client.RemoveAsync(RemoveType.Queue);
             }
         }
-
-        if(_options.ManageQueueLifetimeCycle)
+        catch (Exception ex)
         {
-            var client = await _clientService.CreateClient(connection, _options.ToQueueName());
-            await client.RemoveAsync(RemoveType.Queue);
+            _logger.LogError("Error in MessageQueueAppTopicHandlerBackgroundService (Background service is not running): {message}", ex.Message);
         }
     }
 }
