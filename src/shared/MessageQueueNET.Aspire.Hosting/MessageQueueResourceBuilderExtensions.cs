@@ -1,5 +1,4 @@
 ﻿using Aspire.Hosting.ApplicationModel;
-using Humanizer.Localisation;
 
 namespace Aspire.Hosting;
 

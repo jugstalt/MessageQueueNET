@@ -1,4 +1,4 @@
-@inject DashboardService DashboardService
+﻿@inject DashboardService DashboardService
 @inject IDialogService DialogService
 
 @inherits BaseComponent
@@ -33,7 +33,7 @@
 
 @code {
     [Parameter] public string QueueName { get; set; } = "";
-    [CascadingParameter] public MudDialogInstance? MudDialog { get; set; }
+    [CascadingParameter] public IMudDialogInstance? MudDialog { get; set; }
 
     private string _messagesText = "";
     private bool _oneMessagePerLine = false;

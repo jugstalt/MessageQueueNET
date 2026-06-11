@@ -1,4 +1,4 @@
-@using MessageQueueNET.Client.Models;
+﻿@using MessageQueueNET.Client.Models;
 @inject DashboardService DashboardService
 @inject IDialogService DialogService
 
@@ -32,7 +32,7 @@
 
 @code {
     [Parameter] public string QueueFilter { get; set; } = "*";
-    [CascadingParameter] public MudDialogInstance? MudDialog { get; set; }
+    [CascadingParameter] public IMudDialogInstance? MudDialog { get; set; }
 
     private bool _suspendDequeue;
     private bool _suspendEnqueue;

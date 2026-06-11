@@ -1,4 +1,4 @@
-@inherits ErrorBoundary
+﻿@inherits ErrorBoundary
 @inject IDialogService DialogService
 
 
@@ -8,6 +8,6 @@
     {
         var parameters = new DialogParameters();
         parameters.Add("content", exception.Message);
-        await DialogService.Show<ErrorDialog>("Error", parameters).Result;
+        await DialogService.ShowAsync<ErrorDialog>("Error", parameters);
     }
 }
