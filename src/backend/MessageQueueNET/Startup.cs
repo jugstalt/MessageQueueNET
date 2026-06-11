@@ -1,4 +1,4 @@
-using MessageQueueNET.Client.Extensions.DependencyInjetion;
+﻿using MessageQueueNET.Client.Extensions.DependencyInjetion;
 using MessageQueueNET.Client.Services.Abstraction;
 using MessageQueueNET.Extensions.DependencyInjection;
 using MessageQueueNET.Middleware;
@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using System;
 
 namespace MessageQueueNET
