@@ -1,0 +1,8 @@
+{
+  "appHost": {
+    "path": "src/aspire/MessageQueueNET.AppHost/MessageQueueNET.AppHost.csproj"
+  },
+  "sdk": {
+    "version": "17.0.0"
+  }
+}
