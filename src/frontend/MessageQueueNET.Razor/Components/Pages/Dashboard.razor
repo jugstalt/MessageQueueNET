@@ -12,7 +12,7 @@
 
 <MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_theme" />
 
-<div class="mq-app">
+<div class="mq-app" style="color-scheme:@(_isDarkMode ? "dark" : "light")">
     <header class="mq-appbar">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Size="Size.Small" OnClick="ToggleSidebar" title="Toggle server sidebar" />
         <div class="mq-logo"><i></i>MessageQueueNET</div>

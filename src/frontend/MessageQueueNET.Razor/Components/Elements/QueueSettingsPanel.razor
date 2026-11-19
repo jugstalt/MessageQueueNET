@@ -14,40 +14,50 @@ else
     <div class="mq-card">
         <div class="mq-settings">
             <div>
-                <h4>Suspend</h4>
-                <MudCheckBox T="bool" @bind-Value="_properties.SuspendEnqueue" Label="Suspend enqueue" Color="Color.Error" Dense="true" />
-                <MudCheckBox T="bool" @bind-Value="_properties.SuspendDequeue" Label="Suspend dequeue" Color="Color.Error" Dense="true" />
-            </div>
-            <div>
                 <h4>Confirmation</h4>
-                <MudNumericField T="int" @bind-Value="_properties.ConfirmationPeriodSeconds" Label="Period [seconds]"
-                                 HelperText="@_properties.ConfirmationPeriodSeconds.ToSecondsText("0 = no confirmation")"
-                                 Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" Class="mb-3" />
-                <MudNumericField T="int?" @bind-Value="_properties.MaxUnconfirmedItems" Label="Max. unconfirmed items"
-                                 HelperText="empty/0 = unlimited"
-                                 Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" Class="mb-3" />
-                <MudSelect T="MaxUnconfirmedItemsStrategy" @bind-Value="_properties.MaxUnconfirmedItemsStrategy"
-                           Label="Max. unconfirmed strategy" Variant="Variant.Outlined" Margin="Margin.Dense">
-                    <MudSelectItem T="MaxUnconfirmedItemsStrategy" Value="MaxUnconfirmedItemsStrategy.Absolute">Absolute</MudSelectItem>
-                    <MudSelectItem T="MaxUnconfirmedItemsStrategy" Value="MaxUnconfirmedItemsStrategy.PerClient">Per Client</MudSelectItem>
-                </MudSelect>
+                <label class="mq-field">
+                    <span>Period</span>
+                    <span class="mq-unit"><input class="mq-input" type="number" min="0" @bind="_properties.ConfirmationPeriodSeconds" @bind:event="oninput" /><i>s</i></span>
+                    <small>@_properties.ConfirmationPeriodSeconds.ToSecondsText("0 = no confirmation")</small>
+                </label>
+                <label class="mq-field">
+                    <span>Max. unconfirmed items</span>
+                    <input class="mq-input" type="number" min="0" @bind="_properties.MaxUnconfirmedItems" @bind:event="oninput" />
+                    <small>empty/0 = unlimited</small>
+                </label>
+                <label class="mq-field">
+                    <span>Max. unconfirmed strategy</span>
+                    <select class="mq-input" @bind="_properties.MaxUnconfirmedItemsStrategy">
+                        <option value="@MaxUnconfirmedItemsStrategy.Absolute">Absolute</option>
+                        <option value="@MaxUnconfirmedItemsStrategy.PerClient">Per client</option>
+                    </select>
+                    <small>Per client: limit applies to each dequeuing client</small>
+                </label>
             </div>
             <div>
                 <h4>Lifetime</h4>
-                <MudNumericField T="int" @bind-Value="_properties.LifetimeSeconds" Label="Queue [seconds]"
-                                 HelperText="@_properties.LifetimeSeconds.ToSecondsText("0 = unlimited")"
-                                 Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" Class="mb-3" />
-                <MudNumericField T="int" @bind-Value="_properties.ItemLifetimeSeconds" Label="Item [seconds]"
-                                 HelperText="@_properties.ItemLifetimeSeconds.ToSecondsText("0 = unlimited")"
-                                 Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" />
+                <label class="mq-field">
+                    <span>Queue</span>
+                    <span class="mq-unit"><input class="mq-input" type="number" min="0" @bind="_properties.LifetimeSeconds" @bind:event="oninput" /><i>s</i></span>
+                    <small>@_properties.LifetimeSeconds.ToSecondsText("0 = unlimited")</small>
+                </label>
+                <label class="mq-field">
+                    <span>Item</span>
+                    <span class="mq-unit"><input class="mq-input" type="number" min="0" @bind="_properties.ItemLifetimeSeconds" @bind:event="oninput" /><i>s</i></span>
+                    <small>@_properties.ItemLifetimeSeconds.ToSecondsText("0 = unlimited")</small>
+                </label>
             </div>
         </div>
-    </div>
-    <div class="mq-row" style="margin-top:12px">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
-                   Disabled="_busy" OnClick="Save">Save</MudButton>
-        <MudButton Variant="Variant.Outlined" Disabled="_busy" OnClick="Reset">Reset</MudButton>
-        <MudButton Variant="Variant.Text" Disabled="_busy" OnClick="OnCancel">Cancel</MudButton>
+        <div class="mq-row mq-settings-actions">
+            <button class="mq-btn primary" disabled="@(_busy || !IsDirty())" @onclick="Save">Save</button>
+            <button class="mq-btn" disabled="@(_busy || !IsDirty())" title="Discard changes" @onclick="Reset">Reset</button>
+            <span class="mq-spacer"></span>
+            @if (IsDirty())
+            {
+                <span class="mq-muted">Unsaved changes</span>
+            }
+            <button class="mq-btn ghost" disabled="@_busy" @onclick="OnCancel">Cancel</button>
+        </div>
     </div>
 }
 
@@ -58,6 +68,7 @@ else
 
     private QueueProperties? _properties;
     private bool _busy;
+    private string _original = "";
 
     async protected override Task OnInitializedAsync()
     {
@@ -68,7 +79,13 @@ else
     async private Task Reset()
     {
         _properties = await DashboardService.GetQueueProperties(Queue.QueueName);
+        _original = Snapshot(_properties);
     }
+
+    private static string Snapshot(QueueProperties? p)
+        => p is null ? "" : $"{p.ConfirmationPeriodSeconds}|{p.MaxUnconfirmedItems}|{p.MaxUnconfirmedItemsStrategy}|{p.LifetimeSeconds}|{p.ItemLifetimeSeconds}";
+
+    private bool IsDirty() => Snapshot(_properties) != _original;
 
     async private Task Save()
     {
@@ -80,16 +97,19 @@ else
         _busy = true;
         try
         {
+            // suspend state is controlled by the header toggles; never overwrite it with a stale value
+            _properties.SuspendEnqueue = Queue.SuspendEnqueue;
+            _properties.SuspendDequeue = Queue.SuspendDequeue;
+
             await DashboardService.SetQueueProperties(Queue.QueueName, _properties);
 
-            Queue.SuspendEnqueue = _properties.SuspendEnqueue;
-            Queue.SuspendDequeue = _properties.SuspendDequeue;
             Queue.ConfirmationPeriodSeconds = _properties.ConfirmationPeriodSeconds;
             Queue.MaxUnconfirmedItems = _properties.MaxUnconfirmedItems;
             Queue.MaxUnconfirmedItemsStrategy = _properties.MaxUnconfirmedItemsStrategy;
             Queue.LifetimeSeconds = _properties.LifetimeSeconds;
             Queue.ItemLifetimeSeconds = _properties.ItemLifetimeSeconds;
 
+            _original = Snapshot(_properties);
             Snackbar.Add($"{Queue.QueueName}: settings saved", Severity.Success);
         }
         finally

@@ -151,6 +151,14 @@ table.mq-grid tr.group td { background: var(--mq-surface2); font-weight: 600; cu
 .mq-chart-label { position: absolute; font-size: 10px; color: var(--mq-muted); }
 .mq-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 24px; }
 .mq-settings h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.mq-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; }
+.mq-field > span:first-child { font-size: 12px; color: var(--mq-muted); }
+.mq-field .mq-input { width: 100%; }
+.mq-field small { font-size: 11px; color: var(--mq-muted); }
+.mq-unit { position: relative; display: flex; }
+.mq-unit .mq-input { padding-right: 24px; }
+.mq-unit i { position: absolute; right: 26px; top: 6px; font-style: normal; color: var(--mq-muted); pointer-events: none; }
+.mq-settings-actions { border-top: 1px solid var(--mq-border); margin-top: 4px; padding-top: 12px; }
 .mq-dialog-list { max-height: 200px; overflow: auto; margin-bottom: 12px; padding: 6px 10px; border: 1px solid var(--mud-palette-lines-default); border-radius: 6px; font-size: 12px; }
 
 /* MudDataGrid inside a card: keep it flat */
