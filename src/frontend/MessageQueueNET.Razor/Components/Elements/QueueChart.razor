@@ -1,0 +1,15 @@
+@* Larger area chart of a history (queue length) with max value and time labels *@
+
+<div class="mq-chart">
+    <span class="mq-chart-label" style="top:0;left:0">@(Values.Count > 0 ? Values.Max().ToNumberText() : "")</span>
+    <Sparkline Values="Values" Responsive="true" Width="600" Height="@Height" StrokeWidth="2" />
+    <span class="mq-chart-label" style="bottom:0;left:0">
+        @(Values.Count > 1 ? $"{QueueHistoryService.Window.TotalMinutes:0} min ago" : "Collecting data…")
+    </span>
+    <span class="mq-chart-label" style="bottom:0;right:0">now</span>
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<int> Values { get; set; } = [];
+    [Parameter] public int Height { get; set; } = 150;
+}

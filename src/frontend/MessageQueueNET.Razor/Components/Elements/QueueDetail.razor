@@ -1,0 +1,224 @@
+@inherits BaseComponent
+
+@inject DashboardService DashboardService
+@inject QueueHistoryService History
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+@{
+    var status = Queue.GetStatus();
+}
+
+<div class="mq-detail-head">
+    <div class="mq-row" style="justify-content:space-between;flex-wrap:nowrap">
+        <h2><span class="mq-dot @status.CssClass()"></span><span class="mq-mono">@Queue.QueueName</span></h2>
+        <div class="mq-row" style="flex-wrap:nowrap">
+            <button class="mq-tg @(Queue.SuspendEnqueue ? "susp" : "")" disabled="@_busy" @onclick="ToggleEnqueue"
+                    title="Enqueue @(Queue.SuspendEnqueue ? "resume" : "suspend")">
+                ↑ Enqueue@(Queue.SuspendEnqueue ? " ⏸" : "")
+            </button>
+            <button class="mq-tg @(Queue.SuspendDequeue ? "susp" : "")" disabled="@_busy" @onclick="ToggleDequeue"
+                    title="Dequeue @(Queue.SuspendDequeue ? "resume" : "suspend")">
+                ↓ Dequeue@(Queue.SuspendDequeue ? " ⏸" : "")
+            </button>
+            <button class="mq-btn sm danger" @onclick="Delete">🗑 Delete</button>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="OnClose" title="Close" />
+        </div>
+    </div>
+    <div class="mq-row" style="margin:8px 0 0">
+        <span class="mq-chip @(status == QueueStatus.Empty ? "" : status.CssClass())" title="@status.Description()">
+            <span class="mq-dot @status.CssClass()"></span>@status.DisplayText()
+        </span>
+        <span class="mq-muted">
+            Modified <span title="@Queue.LastModifiedUTC.ToLocalText()">@Queue.LastModifiedUTC.ToAgoText()</span>
+            · Accessed <span title="@Queue.LastAccessUTC.ToLocalText()">@Queue.LastAccessUTC.ToAgoText()</span>
+        </span>
+    </div>
+    <div class="mq-tabs">
+        @foreach (var (key, text) in Tabs())
+        {
+            <button class="@(Tab == key ? "on" : "")" @onclick="() => OnTabChanged.InvokeAsync(key)">@text</button>
+        }
+    </div>
+</div>
+
+<div class="mq-detail-body">
+    @switch (Tab)
+    {
+        case DetailTabs.Messages:
+            <QueueMessagesPanel @key="@("m")" QueueName="@Queue.QueueName" QueueLength="Queue.QueueLength" OnDataChanged="OnDataChanged" />
+            break;
+        case DetailTabs.Unconfirmed:
+            <QueueMessagesPanel @key="@("u")" QueueName="@Queue.QueueName" Unconfirmed="true" QueueLength="Queue.UnconfirmedItems ?? 0" />
+            break;
+        case DetailTabs.Send:
+            <QueueSendPanel Queue="Queue" />
+            break;
+        case DetailTabs.Settings:
+            <QueueSettingsPanel Queue="Queue" OnDataChanged="OnDataChanged" OnCancel="() => OnTabChanged.InvokeAsync(DetailTabs.Overview)" />
+            break;
+        default:
+            @Overview(status)
+            break;
+    }
+</div>
+
+@code {
+    [Parameter] public string ServerName { get; set; } = "";
+    [Parameter, EditorRequired] public QueueInfoModel Queue { get; set; } = default!;
+    [Parameter] public string Tab { get; set; } = DetailTabs.Overview;
+    [Parameter] public EventCallback<string> OnTabChanged { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnDataChanged { get; set; }
+    [Parameter] public EventCallback<QueueDeletion> OnDeleted { get; set; }
+
+    private bool _busy;
+
+    private IEnumerable<(string key, string text)> Tabs()
+    {
+        yield return (DetailTabs.Overview, "Overview");
+        yield return (DetailTabs.Messages, $"Messages ({Queue.QueueLength.ToNumberText()})");
+        yield return (DetailTabs.Unconfirmed, $"Unconfirmed ({(Queue.UnconfirmedItems ?? 0).ToNumberText()})");
+        yield return (DetailTabs.Send, "Send");
+        yield return (DetailTabs.Settings, "Settings");
+    }
+
+    private RenderFragment Overview(QueueStatus status) => __builder =>
+    {
+        var history = History.QueueHistory(ServerName, Queue.QueueName);
+        int clients = Queue.DequeuingClientsCount();
+
+        <div class="mq-kpis">
+            <div class="mq-card mq-kpi">
+                <div class="label">Items</div>
+                <div class="value">@Queue.QueueLength.ToNumberText()</div>
+            </div>
+            <div class="mq-card mq-kpi" title="Unconfirmed / Max. Unconfirmed">
+                <div class="label">Unconfirmed</div>
+                <div class="value @(status == QueueStatus.Warn ? "mq-text-warn" : "")">@Queue.UnconfirmedText()</div>
+            </div>
+            <div class="mq-card mq-kpi" title="Clients with unconfirmed items (only if confirmation period > 0)">
+                <div class="label">Dequeuing Clients</div>
+                <div class="value @(status == QueueStatus.Idle ? "mq-text-idle" : "")">
+                    @(Queue.DequeuingClients is null ? "–" : clients.ToString())
+                </div>
+            </div>
+            <div class="mq-card mq-kpi" title="Change of the queue length in the displayed period">
+                <div class="label">Δ @HistoryMinutes(history) min</div>
+                <div class="value">@Delta(history)</div>
+            </div>
+        </div>
+
+        <div class="mq-card">
+            <div class="mq-card-title">
+                <span>Queue length</span>
+                <span class="mq-muted" style="font-weight:400;font-size:11px">last @HistoryMinutes(history) min · client-side, since page load</span>
+            </div>
+            <QueueChart Values="history" />
+        </div>
+
+        <div class="mq-card">
+            <div class="mq-card-title"><span>Dequeuing Clients</span></div>
+            @if (Queue.DequeuingClients is { Count: > 0 })
+            {
+                <table class="mq-grid" style="margin-top:6px">
+                    <thead><tr><th>Client</th><th class="num">Unconfirmed</th></tr></thead>
+                    <tbody>
+                        @foreach (var client in Queue.DequeuingClients.OrderByDescending(c => c.Value))
+                        {
+                            <tr>
+                                <td class="mq-mono">@(string.IsNullOrEmpty(client.Key) ? "(no id)" : client.Key)</td>
+                                <td class="num">@client.Value.ToNumberText()</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <div class="mq-muted" style="padding:10px 0 0">
+                    @if (Queue.ConfirmationPeriodSeconds <= 0)
+                    {
+                        <span>Only available if a confirmation period is set.</span>
+                    }
+                    else
+                    {
+                        <span>Currently no clients with unconfirmed items.</span>
+                    }
+                    @if (status == QueueStatus.Idle)
+                    {
+                        <span class="mq-text-idle"> Items have not been processed for more than @((int)QueueStatusExtensions.IdleThreshold.TotalMinutes) min!</span>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="mq-card">
+            <div class="mq-card-title">
+                <span>Configuration</span>
+                <a class="mq-link" style="font-weight:400" @onclick="() => OnTabChanged.InvokeAsync(DetailTabs.Settings)">edit</a>
+            </div>
+            <div class="mq-muted" style="margin-top:6px">
+                Lifetime @Queue.LifetimeSeconds.ToSecondsText()
+                · Item lifetime @Queue.ItemLifetimeSeconds.ToSecondsText()
+                · Confirmation @Queue.ConfirmationPeriodSeconds.ToSecondsText("off")
+                · Max Unconfirmed @(Queue.MaxUnconfirmedItems?.ToString() ?? "–") (@Queue.MaxUnconfirmedItemsStrategy)
+            </div>
+        </div>
+    };
+
+    private static int HistoryMinutes(IReadOnlyList<int> history)
+        => Math.Max(1, (int)Math.Round(QueueHistoryService.SampleInterval.TotalMinutes * Math.Max(1, history.Count - 1)));
+
+    private static string Delta(IReadOnlyList<int> history)
+    {
+        if (history.Count < 2)
+        {
+            return "–";
+        }
+
+        int delta = history[^1] - history[0];
+        return delta > 0 ? $"+{delta.ToNumberText()}" : delta.ToNumberText();
+    }
+
+    private Task ToggleEnqueue() => SetSuspend(enqueue: true, !Queue.SuspendEnqueue);
+    private Task ToggleDequeue() => SetSuspend(enqueue: false, !Queue.SuspendDequeue);
+
+    async private Task SetSuspend(bool enqueue, bool suspend)
+    {
+        _busy = true;
+        try
+        {
+            if (enqueue)
+            {
+                await DashboardService.SetQueueSuspendEnqueue(Queue.QueueName, suspend);
+                Queue.SuspendEnqueue = suspend;
+            }
+            else
+            {
+                await DashboardService.SetQueueSuspendDequeue(Queue.QueueName, suspend);
+                Queue.SuspendDequeue = suspend;
+            }
+
+            Snackbar.Add($"{Queue.QueueName}: {(enqueue ? "Enqueue" : "Dequeue")} {(suspend ? "suspended" : "resumed")}", Severity.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await OnDataChanged.InvokeAsync();
+    }
+
+    async private Task Delete()
+    {
+        var parameters = new DialogParameters<DeleteQueueDialog> { { x => x.QueueNames, new[] { Queue.QueueName } } };
+        var dialog = await DialogService.ShowAsync<DeleteQueueDialog>("", parameters, DialogDefaults.Options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: RemoveType removeType })
+        {
+            await OnDeleted.InvokeAsync(new QueueDeletion([Queue.QueueName], removeType));
+        }
+    }
+}

@@ -1,47 +1,91 @@
-﻿@inject DashboardService DashboardService
-@inject IDialogService DialogService
+@inject DashboardService DashboardService
+@inject ISnackbar Snackbar
 
 @inherits BaseComponent
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">
-            <MudIcon Icon="@Icons.Material.Filled.Delete" Class="mr-3" />Delete: @QueueName
+        <MudText Typo="Typo.h6" Class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Delete" Color="Color.Error" />
+            @(QueueNames.Count == 1 ? $"Delete: {QueueNames[0]}" : $"Delete {QueueNames.Count} queues")
         </MudText>
     </TitleContent>
     <DialogContent>
-        <MudSelect Label="Delete" T="Client.RemoveType" @bind-Value="_removeType">
-            <MudSelectItem Value="Client.RemoveType.Queue">Queue</MudSelectItem>
-            <MudSelectItem Value="Client.RemoveType.Messages">All Queued Messages</MudSelectItem>
-            <MudSelectItem Value="Client.RemoveType.UnconfirmedMessages">Unconfirmed Messages</MudSelectItem>
+        @if (QueueNames.Count > 1)
+        {
+            <div class="mq-dialog-list mq-mono">
+                @foreach (var queueName in QueueNames)
+                {
+                    <div>@queueName</div>
+                }
+            </div>
+        }
+        else if (QueueNames.Count == 1 && QueueNames[0].Contains('*'))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                The pattern <span class="mq-mono">@QueueNames[0]</span> affects all matching queues.
+            </MudAlert>
+        }
+        <MudSelect T="RemoveType" Label="What should be deleted?" @bind-Value="_removeType" Variant="Variant.Outlined">
+            <MudSelectItem T="RemoveType" Value="RemoveType.Queue">Queue (including all messages)</MudSelectItem>
+            <MudSelectItem T="RemoveType" Value="RemoveType.Messages">All messages in the queue</MudSelectItem>
+            <MudSelectItem T="RemoveType" Value="RemoveType.UnconfirmedMessages">Unconfirmed messages only</MudSelectItem>
         </MudSelect>
+        @if (_busy)
+        {
+            <MudProgressLinear Color="Color.Error" Indeterminate="true" Class="mt-3" />
+        }
     </DialogContent>
     <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
         <MudButton Variant="Variant.Filled"
-                   Color="Color.Primary"
-                   OnClick="() => MudDialog?.Close()"
-                   Class="px-10">Close</MudButton>
-        <MudButton Variant="Variant.Filled"
-                   Color="Color.Secondary"
-                   OnClick="Submit"
-                   Class="px-10">
-            <MudIcon Icon="@Icons.Material.Filled.Delete" Class="mr-3" />
-            Delete
-        </MudButton>
+                   Color="Color.Error"
+                   StartIcon="@Icons.Material.Filled.Delete"
+                   Disabled="_busy"
+                   OnClick="Submit">Delete</MudButton>
     </DialogActions>
 </MudDialog>
 
 @code {
-    [Parameter] public string QueueName { get; set; } = "";
+    [Parameter] public IReadOnlyList<string> QueueNames { get; set; } = [];
     [CascadingParameter] public IMudDialogInstance? MudDialog { get; set; }
 
-    private Client.RemoveType _removeType = Client.RemoveType.Queue;
+    private RemoveType _removeType = RemoveType.Queue;
+    private bool _busy;
+
+    private void Cancel() => MudDialog?.Cancel();
 
     async private Task Submit()
     {
-        if (await DashboardService.DeleteQueue(QueueName, _removeType))
+        _busy = true;
+        var failed = new List<string>();
+
+        foreach (var queueName in QueueNames)
         {
-            MudDialog?.Close();
+            try
+            {
+                if (!await DashboardService.DeleteQueue(queueName, _removeType))
+                {
+                    failed.Add(queueName);
+                }
+            }
+            catch
+            {
+                failed.Add(queueName);
+            }
         }
+
+        _busy = false;
+
+        if (failed.Count > 0)
+        {
+            Snackbar.Add($"Delete failed: {string.Join(", ", failed)}", Severity.Error);
+        }
+        else
+        {
+            Snackbar.Add(QueueNames.Count == 1 ? $"{QueueNames[0]}: deleted" : $"{QueueNames.Count} queues: deleted", Severity.Success);
+        }
+
+        MudDialog?.Close(DialogResult.Ok(_removeType));
     }
-}  
+}

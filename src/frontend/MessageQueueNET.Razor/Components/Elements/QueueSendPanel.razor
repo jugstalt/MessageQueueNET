@@ -1,0 +1,69 @@
+@inherits BaseComponent
+
+@inject DashboardService DashboardService
+@inject ISnackbar Snackbar
+
+<div class="mq-card">
+    @if (Queue.SuspendEnqueue)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+            Enqueue is suspended for this queue – the server will reject new messages.
+        </MudAlert>
+    }
+    <MudTextField T="string" @bind-Value="_text" Immediate="true"
+                  Label="@(_oneMessagePerLine ? "Messages (one per line)" : "Message")"
+                  Variant="Variant.Outlined" Lines="10" Class="mq-mono" />
+    <div class="mq-row" style="margin-top:8px">
+        <MudCheckBox T="bool" @bind-Value="_oneMessagePerLine" Label="One message per line" Dense="true" />
+        <span class="mq-spacer"></span>
+        @if (!string.IsNullOrWhiteSpace(_text))
+        {
+            <span class="mq-muted">@MessageCount() message(s)</span>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_text))" OnClick="Send">Send</MudButton>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public QueueInfoModel Queue { get; set; } = default!;
+
+    private string _text = "";
+    private bool _oneMessagePerLine;
+    private bool _busy;
+
+    private IEnumerable<string> Messages()
+        => _oneMessagePerLine
+            ? _text.Split('\n').Select(l => l.Trim()).Where(l => !string.IsNullOrEmpty(l))
+            : [_text.Trim()];
+
+    private int MessageCount() => Messages().Count();
+
+    async private Task Send()
+    {
+        if (string.IsNullOrWhiteSpace(_text))
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var messages = Messages().ToArray();
+
+            if (await DashboardService.AddMessages(Queue.QueueName, messages))
+            {
+                Snackbar.Add($"{messages.Length} message(s) sent to {Queue.QueueName}", Severity.Success);
+                _text = "";
+            }
+            else
+            {
+                Snackbar.Add($"Sending to {Queue.QueueName} failed", Severity.Error);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

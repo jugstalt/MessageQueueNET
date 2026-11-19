@@ -15,6 +15,7 @@ static public class ServiceCollectionExtensions
             .AddHostedService<QueryQueueBackgroundService>()
             .AddTransient<DashboardEventBusService>()
             .AddMessageQueueClientService()
-            .AddScoped<DashboardService>();
+            .AddScoped<DashboardService>()
+            .AddScoped<QueueHistoryService>();
     }
 }

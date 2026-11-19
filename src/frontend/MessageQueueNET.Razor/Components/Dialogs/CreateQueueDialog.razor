@@ -1,33 +1,33 @@
-﻿@inject DashboardService DashboardService
-@inject IDialogService DialogService
+@inject DashboardService DashboardService
+@inject ISnackbar Snackbar
 
 @inherits BaseComponent
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">
-            <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Class="mr-3" />Create Queue
+        <MudText Typo="Typo.h6" Class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Color="Color.Primary" />Create queue
         </MudText>
     </TitleContent>
     <DialogContent>
-        <MudText Typo="Typo.h6">
-            Type new queue name in namespace @(DashboardService.CreateQueuePattern()):
+        <MudText Typo="Typo.body2" Class="mb-2">
+            Namespace: <span class="mq-mono">@DashboardService.CreateQueuePattern()</span>
         </MudText>
-        <MudTextField T="string" Style="width:800px;max-width:100%"
-                      Label="New Queue Name" 
-                      Variant="Variant.Text" 
+        <MudTextField T="string" Style="width:600px;max-width:100%"
+                      Label="Name of the new queue"
+                      Variant="Variant.Outlined"
                       @bind-Value="_newQueueName"
+                      Immediate="true"
+                      AutoFocus="true"
+                      OnKeyDown="OnKeyDown"
                       Required="true" />
     </DialogContent>
     <DialogActions>
-        <MudButton Variant="Variant.Filled"
-                   Color="Color.Secondary"
-                   OnClick="() => MudDialog?.Close()"
-                   Class="px-10">Close</MudButton>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
-                   OnClick="Submit"
-                   Class="px-10">Add</MudButton>
+                   Disabled="string.IsNullOrWhiteSpace(_newQueueName)"
+                   OnClick="Submit">Create</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -43,16 +43,31 @@
         _newQueueName = DashboardService.CreateQueuePattern().Replace("*", "");
     }
 
+    private void Cancel() => MudDialog?.Cancel();
+
+    async private Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await Submit();
+        }
+    }
+
     async private Task Submit()
     {
-        if(String.IsNullOrWhiteSpace(_newQueueName))
+        if (String.IsNullOrWhiteSpace(_newQueueName))
         {
             return;
         }
 
-        if (await DashboardService.CreateQueue(_newQueueName))
+        var queueName = _newQueueName.Trim();
+        var prefix = DashboardService.CreateQueuePattern().Replace("*", "");
+        var fullName = queueName.StartsWith(prefix) ? queueName : prefix + queueName;
+
+        if (await DashboardService.CreateQueue(queueName))
         {
-            MudDialog?.Close();
+            Snackbar.Add($"{fullName}: created", Severity.Success);
+            MudDialog?.Close(DialogResult.Ok(fullName));
         }
     }
 }

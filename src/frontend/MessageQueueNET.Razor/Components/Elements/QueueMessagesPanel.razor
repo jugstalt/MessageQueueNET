@@ -1,0 +1,113 @@
+@using MessageQueueNET.Client.Models
+
+@inherits BaseComponent
+
+@inject DashboardService DashboardService
+@inject ISnackbar Snackbar
+
+<div class="mq-row" style="margin-bottom:8px">
+    <div class="mq-search" style="max-width:320px">
+        <input class="mq-input" placeholder="Search messages…" @bind="_search" @bind:event="oninput" />
+    </div>
+    @if (_messages is not null)
+    {
+        <span class="mq-muted">
+            @Filtered().Count() of @_messages.Count loaded
+            @if (QueueLength != _messages.Count)
+            {
+                <span title="Current count on the server – reload for the current list"> · Server: @QueueLength.ToNumberText()</span>
+            }
+        </span>
+    }
+    <span class="mq-spacer"></span>
+    <button class="mq-btn sm" disabled="@_loading" @onclick="LoadMessages">⟳ Reload</button>
+</div>
+
+@if (_loading && _messages is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+}
+else if (_messages is { Count: 0 })
+{
+    <div class="mq-card mq-empty">No @(Unconfirmed ? "unconfirmed " : "")messages</div>
+}
+else if (_messages is not null)
+{
+    <div class="mq-card" style="padding:0">
+        <MudDataGrid T="MessageResult" Items="Filtered()" Dense="true" Hover="true" Loading="_loading"
+                     RowsPerPage="50" Elevation="0" Style="white-space:nowrap">
+            <Columns>
+                @if (!Unconfirmed)
+                {
+                    <TemplateColumn T="MessageResult" Sortable="false" CellStyle="width:40px">
+                        <CellTemplate>
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Color="Color.Error"
+                                           title="Delete message" OnClick="() => DeleteMessage(context.Item)" />
+                        </CellTemplate>
+                    </TemplateColumn>
+                }
+                <PropertyColumn T="MessageResult" TProperty="Guid" Property="x => x.Id" Title="Id" Sortable="false" CellClass="mq-mono mq-muted" />
+                <PropertyColumn T="MessageResult" TProperty="DateTime" Property="x => x.CreationDateUTC" Title="Created" Sortable="true">
+                    <CellTemplate>@context.Item.CreationDateUTC.ToLocalText()</CellTemplate>
+                </PropertyColumn>
+                @if (_messages.Any(m => m.DequeuingClientId != null))
+                {
+                    <PropertyColumn T="MessageResult" TProperty="string" Property="x => x.DequeuingClientId ?? string.Empty" Title="Deq. Client" Sortable="true" CellClass="mq-mono" />
+                }
+                <PropertyColumn T="MessageResult" TProperty="string" Property="x => x.Value ?? string.Empty" Title="Message" Sortable="false" CellClass="mq-mono" />
+            </Columns>
+            <PagerContent>
+                <MudDataGridPager T="MessageResult" PageSizeOptions="[25, 50, 100, 500]" />
+            </PagerContent>
+        </MudDataGrid>
+    </div>
+}
+
+@code {
+    [Parameter] public string QueueName { get; set; } = "";
+    [Parameter] public bool Unconfirmed { get; set; }
+    [Parameter] public int QueueLength { get; set; }
+    [Parameter] public EventCallback OnDataChanged { get; set; }
+
+    private string _search = "";
+    private bool _loading;
+    private List<MessageResult>? _messages;
+
+    async protected override Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await LoadMessages();
+    }
+
+    private IEnumerable<MessageResult> Filtered()
+        => (_messages ?? []).FitsSearchString(_search.Trim());
+
+    async private Task LoadMessages()
+    {
+        _loading = true;
+        try
+        {
+            var result = await DashboardService.GetAllQueueMessages(QueueName, Unconfirmed);
+
+            _messages = ((Unconfirmed ? result.UnconfirmedMessages : result.Messages) ?? []).ToList();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    async private Task DeleteMessage(MessageResult message)
+    {
+        if (await DashboardService.DeleteMessage(QueueName, message.Id))
+        {
+            Snackbar.Add($"Message {message.Id} deleted", Severity.Success);
+            await LoadMessages();
+            await OnDataChanged.InvokeAsync();
+        }
+        else
+        {
+            Snackbar.Add($"Message {message.Id} could not be deleted", Severity.Error);
+        }
+    }
+}

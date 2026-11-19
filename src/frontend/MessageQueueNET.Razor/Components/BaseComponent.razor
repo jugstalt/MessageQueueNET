@@ -1,4 +1,4 @@
-﻿@inherits ErrorBoundary
+@inherits ErrorBoundary
 @inject IDialogService DialogService
 
 
@@ -6,8 +6,15 @@
 @code {
     protected override async Task OnErrorAsync(Exception exception)
     {
-        var parameters = new DialogParameters();
-        parameters.Add("content", exception.Message);
-        await DialogService.ShowAsync<ErrorDialog>("Error", parameters);
+        var parameters = new DialogParameters<ErrorDialog>
+        {
+            { x => x.Content, exception.Message }
+        };
+
+        var dialog = await DialogService.ShowAsync<ErrorDialog>("Error", parameters);
+        await dialog.Result;
+
+        // allow further errors to be reported, otherwise repeated exceptions end the circuit
+        Recover();
     }
 }

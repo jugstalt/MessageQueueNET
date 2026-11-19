@@ -1,0 +1,384 @@
+@inherits BaseComponent
+
+@inject DashboardService DashboardService
+@inject QueueHistoryService History
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<section class="mq-list">
+    <div class="mq-list-toolbar">
+        <div class="mq-row" style="flex-wrap:nowrap">
+            <div class="mq-search">
+                <input class="mq-input" placeholder="Search queues…" @bind="_search" @bind:event="oninput" />
+            </div>
+            @if (DashboardService.CanCreateQueue())
+            {
+                <button class="mq-btn primary" title="Create queue (@DashboardService.CreateQueuePattern())" @onclick="CreateQueue">＋ Queue</button>
+            }
+            @if (!string.IsNullOrEmpty(DashboardService.SelectedServerFilter) || DashboardService.CanDeleteMany())
+            {
+                <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true"
+                         AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" title="More actions">
+                    @if (!string.IsNullOrEmpty(DashboardService.SelectedServerFilter))
+                    {
+                        <MudMenuItem Icon="@Icons.Material.Outlined.PauseCircleOutline" OnClick="SuspendByFilter">
+                            Suspend by filter (@DashboardService.SelectedServerFilter)…
+                        </MudMenuItem>
+                    }
+                    @if (DashboardService.CanDeleteMany())
+                    {
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="DeleteByPattern">
+                            Delete by filter (@DashboardService.DeleteManyQueuePattern())…
+                        </MudMenuItem>
+                    }
+                </MudMenu>
+            }
+        </div>
+
+        <div class="mq-row">
+            @foreach (var filter in Enum.GetValues<ListFilter>())
+            {
+                int count = Queues.Count(q => Matches(q, filter));
+                string warn = filter == ListFilter.Problems && count > 0 && _filter != filter ? "warn" : "";
+                <button class="mq-chip @(_filter == filter ? "on" : "") @warn" @onclick="() => _filter = filter">
+                    @FilterText(filter) <b>@count</b>
+                </button>
+            }
+            <span class="mq-spacer"></span>
+            <label class="mq-check" title="Group by name prefix (up to the last '.')">
+                <input type="checkbox" @bind="_group" /> Group
+            </label>
+        </div>
+
+        @if (_selected.Count > 0)
+        {
+            <div class="mq-bulkbar">
+                <b>@_selected.Count selected</b>
+                <span class="mq-toggle" title="Enqueue">
+                    <button disabled>↑ Enqueue</button>
+                    <button title="Suspend enqueue" disabled="@_busy" @onclick="() => Bulk(BulkOp.Enqueue, true)">⏸</button>
+                    <button title="Resume enqueue" disabled="@_busy" @onclick="() => Bulk(BulkOp.Enqueue, false)">▶</button>
+                </span>
+                <span class="mq-toggle" title="Dequeue">
+                    <button disabled>↓ Dequeue</button>
+                    <button title="Suspend dequeue" disabled="@_busy" @onclick="() => Bulk(BulkOp.Dequeue, true)">⏸</button>
+                    <button title="Resume dequeue" disabled="@_busy" @onclick="() => Bulk(BulkOp.Dequeue, false)">▶</button>
+                </span>
+                <span class="mq-toggle" title="Enqueue + Dequeue">
+                    <button disabled>Both</button>
+                    <button title="Suspend both" disabled="@_busy" @onclick="() => Bulk(BulkOp.Both, true)">⏸</button>
+                    <button title="Resume both" disabled="@_busy" @onclick="() => Bulk(BulkOp.Both, false)">▶</button>
+                </span>
+                <button class="mq-btn sm danger" disabled="@_busy" @onclick="DeleteSelected">🗑 Delete</button>
+                <button class="mq-btn sm ghost" title="Clear selection" @onclick="() => _selected.Clear()">✕</button>
+            </div>
+        }
+    </div>
+
+    <div class="mq-list-scroll">
+        @{
+            var visible = VisibleQueues();
+        }
+        <table class="mq-grid">
+            <thead>
+                <tr>
+                    <th style="width:24px">
+                        <input type="checkbox" title="Select all visible"
+                               checked="@(visible.Count > 0 && visible.All(q => _selected.Contains(q.QueueName)))"
+                               @onchange="() => ToggleSelection(visible)" />
+                    </th>
+                    <th class="sortable" style="width:14px" title="Sort by state" @onclick="() => Sort(SortKey.Status)">@SortMark(SortKey.Status)</th>
+                    <th class="sortable" @onclick="() => Sort(SortKey.Name)">Queue@(SortMark(SortKey.Name))</th>
+                    <th title="Queue length of the last @((int)QueueHistoryService.Window.TotalMinutes) min">Trend</th>
+                    <th class="sortable num" @onclick="() => Sort(SortKey.Items)">Items@(SortMark(SortKey.Items))</th>
+                    <th class="sortable num" title="Unconfirmed Items" @onclick="() => Sort(SortKey.Unconfirmed)">Unc.@(SortMark(SortKey.Unconfirmed))</th>
+                    <th class="sortable num" title="Last modified" @onclick="() => Sort(SortKey.Modified)">Modified@(SortMark(SortKey.Modified))</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!Loaded)
+                {
+                    <tr><td colspan="7" class="mq-empty">Loading queues…</td></tr>
+                }
+                else if (visible.Count == 0)
+                {
+                    <tr><td colspan="7" class="mq-empty">No queues</td></tr>
+                }
+                else if (_group)
+                {
+                    @foreach (var group in visible.GroupBy(q => q.GroupName()).OrderBy(g => g.Key))
+                    {
+                        var groupQueues = group.ToList();
+                        int problems = groupQueues.Count(q => q.IsProblem());
+                        bool collapsed = _collapsedGroups.Contains(group.Key);
+                        bool hasErrors = groupQueues.Any(q => q.GetStatus() == QueueStatus.Error);
+
+                        <tr class="group" @onclick="() => ToggleGroup(group.Key)">
+                            <td @onclick:stopPropagation="true">
+                                <input type="checkbox" title="Select group"
+                                       checked="@groupQueues.All(q => _selected.Contains(q.QueueName))"
+                                       @onchange="() => ToggleSelection(groupQueues)" />
+                            </td>
+                            <td>@(collapsed ? "▸" : "▾")</td>
+                            <td class="name mq-mono" title="@group.Key">@(string.IsNullOrEmpty(group.Key) ? "(no prefix)" : $"{group.Key}.*")</td>
+                            <td>
+                                @if (problems > 0)
+                                {
+                                    <span class="mq-badge @(hasErrors ? "error" : "warn")" title="@problems problem(s)">⚠ @problems</span>
+                                }
+                            </td>
+                            <td class="num">@groupQueues.Sum(q => q.QueueLength).ToNumberText()</td>
+                            <td class="num mq-muted">@groupQueues.Sum(q => q.UnconfirmedItems ?? 0).ToNumberText()</td>
+                            <td class="num mq-muted">@groupQueues.Count</td>
+                        </tr>
+                        @if (!collapsed)
+                        {
+                            @foreach (var queue in groupQueues)
+                            {
+                                @QueueRow(queue)
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    @foreach (var queue in visible)
+                    {
+                        @QueueRow(queue)
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mq-list-foot">
+        @Queues.Count Queues
+        @if (Queues.Count > 0)
+        {
+            var lastAccess = Queues.Max(q => q.LastAccessUTC);
+            <span title="@lastAccess.ToLocalText()"> · Last access @lastAccess.ToAgoText()</span>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public string ServerName { get; set; } = "";
+    [Parameter] public IReadOnlyList<QueueInfoModel> Queues { get; set; } = [];
+    [Parameter] public bool Loaded { get; set; }
+    [Parameter] public string? SelectedQueue { get; set; }
+    [Parameter] public EventCallback<string> OnOpen { get; set; }
+    [Parameter] public EventCallback OnDataChanged { get; set; }
+    [Parameter] public EventCallback<QueueDeletion> OnDeleted { get; set; }
+
+    private enum ListFilter { All, Items, Suspended, Problems }
+    private enum SortKey { Status, Name, Items, Unconfirmed, Modified }
+    private enum BulkOp { Enqueue, Dequeue, Both }
+
+    private string _search = "";
+    private ListFilter _filter = ListFilter.All;
+    private bool _group;
+    private SortKey _sortKey = SortKey.Name;
+    private bool _sortDescending;
+    private bool _busy;
+    private readonly HashSet<string> _selected = new();
+    private readonly HashSet<string> _collapsedGroups = new();
+
+    protected override void OnParametersSet()
+    {
+        // drop selections of queues that no longer exist
+        _selected.IntersectWith(Queues.Select(q => q.QueueName));
+    }
+
+    private RenderFragment QueueRow(QueueInfoModel queue) => __builder =>
+    {
+        var status = queue.GetStatus();
+        <tr class="item @(queue.QueueName == SelectedQueue ? "sel" : "")" @key="queue.QueueName" @onclick="() => OnOpen.InvokeAsync(queue.QueueName)">
+            <td @onclick:stopPropagation="true">
+                <input type="checkbox" checked="@_selected.Contains(queue.QueueName)" @onchange="() => ToggleSelection(queue.QueueName)" />
+            </td>
+            <td title="@status.DisplayText(): @status.Description()"><span class="mq-dot @status.CssClass()"></span></td>
+            <td class="name mq-mono" style="@(_group ? "padding-left:20px" : "")" title="@queue.QueueName">@(_group ? queue.ShortName() : queue.QueueName)</td>
+            <td>
+                <Sparkline Values="History.QueueHistory(ServerName, queue.QueueName)"
+                           Color="@(status == QueueStatus.Error ? "var(--mq-error)" : "var(--mq-primary)")" />
+            </td>
+            <td class="num"><b>@queue.QueueLength.ToNumberText()</b></td>
+            <td class="num @(status == QueueStatus.Warn ? "mq-text-warn" : "mq-muted")">@queue.UnconfirmedText()</td>
+            <td class="num mq-muted" title="@queue.LastModifiedUTC.ToLocalText()">@queue.LastModifiedUTC.ToAgoText()</td>
+        </tr>
+    };
+
+    private static bool Matches(QueueInfoModel queue, ListFilter filter) => filter switch
+    {
+        ListFilter.Items => queue.QueueLength > 0,
+        ListFilter.Suspended => queue.SuspendEnqueue || queue.SuspendDequeue,
+        ListFilter.Problems => queue.IsProblem(),
+        _ => true
+    };
+
+    private static string FilterText(ListFilter filter) => filter switch
+    {
+        ListFilter.Items => "With items",
+        ListFilter.Suspended => "Suspended",
+        ListFilter.Problems => "Problems",
+        _ => "All"
+    };
+
+    private List<QueueInfoModel> VisibleQueues()
+    {
+        var queues = Queues
+            .FitsSearchString(_search.Trim())
+            .Where(q => Matches(q, _filter));
+
+        queues = _sortKey switch
+        {
+            SortKey.Status => Order(queues, q => (int)q.GetStatus()),
+            SortKey.Items => Order(queues, q => q.QueueLength),
+            SortKey.Unconfirmed => Order(queues, q => q.UnconfirmedItems ?? -1),
+            SortKey.Modified => Order(queues, q => q.LastModifiedUTC),
+            _ => Order(queues, q => q.QueueName)
+        };
+
+        return queues.ToList();
+    }
+
+    private IEnumerable<QueueInfoModel> Order<TKey>(IEnumerable<QueueInfoModel> queues, Func<QueueInfoModel, TKey> key)
+        => _sortDescending
+            ? queues.OrderByDescending(key).ThenBy(q => q.QueueName)
+            : queues.OrderBy(key).ThenBy(q => q.QueueName);
+
+    private void Sort(SortKey key)
+    {
+        if (_sortKey == key)
+        {
+            _sortDescending = !_sortDescending;
+        }
+        else
+        {
+            _sortKey = key;
+            // numbers & dates: biggest/newest first
+            _sortDescending = key is SortKey.Items or SortKey.Unconfirmed or SortKey.Modified;
+        }
+    }
+
+    private string SortMark(SortKey key) => _sortKey == key ? (_sortDescending ? " ▼" : " ▲") : "";
+
+    private void ToggleGroup(string group)
+    {
+        if (!_collapsedGroups.Remove(group))
+        {
+            _collapsedGroups.Add(group);
+        }
+    }
+
+    private void ToggleSelection(string queueName)
+    {
+        if (!_selected.Remove(queueName))
+        {
+            _selected.Add(queueName);
+        }
+    }
+
+    private void ToggleSelection(IReadOnlyCollection<QueueInfoModel> queues)
+    {
+        if (queues.All(q => _selected.Contains(q.QueueName)))
+        {
+            _selected.ExceptWith(queues.Select(q => q.QueueName));
+        }
+        else
+        {
+            _selected.UnionWith(queues.Select(q => q.QueueName));
+        }
+    }
+
+    async private Task Bulk(BulkOp op, bool suspend)
+    {
+        _busy = true;
+        var failed = new List<string>();
+        var queues = Queues.Where(q => _selected.Contains(q.QueueName)).ToArray();
+
+        foreach (var queue in queues)
+        {
+            try
+            {
+                switch (op)
+                {
+                    case BulkOp.Enqueue:
+                        await DashboardService.SetQueueSuspendEnqueue(queue.QueueName, suspend);
+                        queue.SuspendEnqueue = suspend;
+                        break;
+                    case BulkOp.Dequeue:
+                        await DashboardService.SetQueueSuspendDequeue(queue.QueueName, suspend);
+                        queue.SuspendDequeue = suspend;
+                        break;
+                    default:
+                        await DashboardService.SetQueuesSuspend(queue.QueueName, suspend, suspend);
+                        queue.SuspendEnqueue = queue.SuspendDequeue = suspend;
+                        break;
+                }
+            }
+            catch
+            {
+                failed.Add(queue.QueueName);
+            }
+        }
+
+        _busy = false;
+
+        string what = op switch { BulkOp.Enqueue => "Enqueue", BulkOp.Dequeue => "Dequeue", _ => "Enqueue + Dequeue" };
+        int succeeded = queues.Length - failed.Count;
+        if (succeeded > 0)
+        {
+            Snackbar.Add($"{succeeded} Queue(s): {what} {(suspend ? "suspended" : "resumed")}", Severity.Success);
+        }
+        if (failed.Count > 0)
+        {
+            Snackbar.Add($"Failed: {string.Join(", ", failed)}", Severity.Error);
+        }
+
+        await OnDataChanged.InvokeAsync();
+    }
+
+    async private Task DeleteSelected()
+    {
+        var names = Queues.Where(q => _selected.Contains(q.QueueName)).Select(q => q.QueueName).ToArray();
+        var removeType = await ShowDeleteDialog(names);
+
+        if (removeType.HasValue)
+        {
+            _selected.Clear();
+            await OnDeleted.InvokeAsync(new QueueDeletion(names, removeType.Value));
+        }
+    }
+
+    async private Task DeleteByPattern()
+    {
+        await ShowDeleteDialog([DashboardService.DeleteManyQueuePattern()]);
+    }
+
+    async private Task<RemoveType?> ShowDeleteDialog(IReadOnlyList<string> queueNames)
+    {
+        var parameters = new DialogParameters<DeleteQueueDialog> { { x => x.QueueNames, queueNames } };
+        var dialog = await DialogService.ShowAsync<DeleteQueueDialog>("", parameters, DialogDefaults.Options);
+        var result = await dialog.Result;
+
+        return result is { Canceled: false, Data: RemoveType removeType } ? removeType : null;
+    }
+
+    async private Task SuspendByFilter()
+    {
+        var parameters = new DialogParameters<QueuesSuspendDialog> { { x => x.QueueFilter, DashboardService.SelectedServerFilter ?? "*" } };
+        await DialogService.ShowAsync<QueuesSuspendDialog>("", parameters, DialogDefaults.Options);
+    }
+
+    async private Task CreateQueue()
+    {
+        var dialog = await DialogService.ShowAsync<CreateQueueDialog>("", DialogDefaults.Options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string queueName })
+        {
+            await OnOpen.InvokeAsync(queueName);
+        }
+    }
+}
