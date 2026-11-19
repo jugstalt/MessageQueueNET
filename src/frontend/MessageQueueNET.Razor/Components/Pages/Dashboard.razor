@@ -1,36 +1,338 @@
-@inject DashboardService DashboardService
+@using MessageQueueNET.Client.Models
+@using System.Web
+
 @inherits BaseComponent
+@implements IDisposable
 
-<MudThemeProvider @bind-IsDarkMode="@_isDarkMode" Theme="_theme" />
-<MudPopoverProvider />
+@inject DashboardService DashboardService
+@inject QueryQueueEventBus QueryEvents
+@inject QueueHistoryService History
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
+<MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_theme" />
 
-<div class="main-layout">
-    <!-- Top Bar -->
-    <MudAppBar>
-        <NavHeader ToggleDarkmode="ToggleDarkmode" />
-    </MudAppBar>
+<div class="mq-app">
+    <header class="mq-appbar">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Size="Size.Small" OnClick="ToggleSidebar" title="Toggle server sidebar" />
+        <div class="mq-logo"><i></i>MessageQueueNET</div>
+        <div class="mq-crumb">
+            / <a @onclick="CloseQueue" title="Server overview">@ServerName</a>
+            @if (_selectedQueue is not null)
+            {
+                <span> / <span class="mq-mono">@_selectedQueue</span></span>
+            }
+        </div>
+        <span class="mq-spacer"></span>
+        <span class="mq-live" title="Changes are applied live via long polling">
+            @if (Loaded(ServerName))
+            {
+                <span><b>●</b> live</span>
+            }
+            else
+            {
+                <span>connecting…</span>
+            }
+        </span>
+        <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                       Size="Size.Small" OnClick="ToggleDarkMode" title="Light/dark (remembered)" />
+    </header>
 
-    <!-- scrollable Content -->
-    <div class="scrollable-content">
-        <MudContainer>
-            <ServerQueues />
-        </MudContainer>
+    <div class="mq-body">
+        <ServerSidebar Servers="ServerSummaries()"
+                       SelectedServer="@ServerName"
+                       SelectedServerUrl="@DashboardService.SelectedServerUrl"
+                       SelectedServerFilter="@DashboardService.SelectedServerFilter"
+                       Collapsed="_sidebarCollapsed"
+                       OnSelect="SelectServer" />
+
+        <QueueList @key="ServerName"
+                   ServerName="@ServerName"
+                   Queues="Queues(ServerName)"
+                   Loaded="Loaded(ServerName)"
+                   SelectedQueue="@_selectedQueue"
+                   OnOpen="OpenQueue"
+                   OnDataChanged="StateHasChanged"
+                   OnDeleted="QueuesDeleted" />
+
+        <main class="mq-detail">
+            @if (_selectedQueue is null)
+            {
+                <ServerOverview ServerName="@ServerName"
+                                ServerUrl="@DashboardService.SelectedServerUrl"
+                                Queues="Queues(ServerName)"
+                                Loaded="Loaded(ServerName)"
+                                OnOpen="OpenQueue" />
+            }
+            else if (Queues(ServerName).FirstOrDefault(q => q.QueueName == _selectedQueue) is QueueInfoModel queue)
+            {
+                <QueueDetail @key="@($"{ServerName}\n{queue.QueueName}")"
+                             ServerName="@ServerName"
+                             Queue="queue"
+                             Tab="@_tab"
+                             OnTabChanged="SelectTab"
+                             OnClose="CloseQueue"
+                             OnDataChanged="StateHasChanged"
+                             OnDeleted="QueuesDeleted" />
+            }
+            else
+            {
+                <div class="mq-detail-body">
+                    @if (Loaded(ServerName))
+                    {
+                        <div class="mq-card mq-empty">
+                            Queue <span class="mq-mono">@_selectedQueue</span> does not exist (yet).<br /><br />
+                            <button class="mq-btn" @onclick="CloseQueue">Back to server overview</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+                    }
+                </div>
+            }
+        </main>
     </div>
 
-    <!-- Footer -->
-    <div class="footer">
-        <Footer />
-    </div>
+    <Footer Queues="Queues(ServerName)" />
 </div>
 
-
 @code {
-    private MudTheme _theme = new();
+    private const string ThemeStorageKey = "mqnet.theme";
+    private const string SidebarStorageKey = "mqnet.sidebar";
+
+    private readonly ConcurrentDictionary<string, List<QueueInfoModel>> _models = new();
+    private string? _selectedQueue;
+    private string _tab = DetailTabs.Overview;
+    private bool _sidebarCollapsed;
     private bool _isDarkMode = true;
 
-    private void ToggleDarkmode()
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#594ae2",
+            Background = "#f4f5f9",
+            BackgroundGray = "#f0f1f6",
+            Surface = "#ffffff",
+            AppbarBackground = "#ffffff",
+            AppbarText = "#1f2230",
+            LinesDefault = "#dde0ea",
+            TextPrimary = "#1f2230",
+            TextSecondary = "#6b7085",
+            Error = "#e53950",
+            Warning = "#f08a24",
+            Success = "#1fae74",
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#7e6fff",
+            Background = "#1a1a27",
+            BackgroundGray = "#2b2b3d",
+            Surface = "#232333",
+            AppbarBackground = "#232333",
+            DrawerBackground = "#232333",
+            LinesDefault = "#3a3a50",
+            TableLines = "#3a3a50",
+            TextPrimary = "#e6e6f0",
+            TextSecondary = "#9a9ab0",
+            Error = "#f64e62",
+            Warning = "#ff9f43",
+            Success = "#2ecc8f",
+        }
+    };
+
+    private string ServerName => DashboardService.SelectedServerName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await ApplyDeepLink();
+
+        foreach (var (serverName, result) in QueryEvents.QueuePropertiesResult)
+        {
+            _models[serverName] = result.ToQueueInfoModels().ToList();
+        }
+
+        QueryEvents.OnQueuePropertiesResultAsync += QueuePropertiesReceived;
+        History.OnSampledAsync += HistorySampled;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var theme = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
+            var sidebar = await JS.InvokeAsync<string?>("localStorage.getItem", SidebarStorageKey);
+
+            bool isDarkMode = theme != "light";
+            bool sidebarCollapsed = sidebar == "collapsed";
+
+            if (isDarkMode != _isDarkMode || sidebarCollapsed != _sidebarCollapsed)
+            {
+                _isDarkMode = isDarkMode;
+                _sidebarCollapsed = sidebarCollapsed;
+                StateHasChanged();
+            }
+        }
+    }
+
+    #region Data
+
+    private IReadOnlyList<QueueInfoModel> Queues(string serverName)
+        => _models.TryGetValue(serverName, out var queues) ? queues : [];
+
+    private bool Loaded(string serverName) => _models.ContainsKey(serverName);
+
+    private IEnumerable<ServerSummary> ServerSummaries()
+        => DashboardService.QueueServersNames.Select(name =>
+        {
+            var queues = Queues(name);
+            var problems = queues.Where(q => q.IsProblem()).ToList();
+
+            return new ServerSummary(
+                name,
+                Loaded(name),
+                queues.Count,
+                queues.Sum(q => q.QueueLength),
+                queues.Sum(q => q.UnconfirmedItems ?? 0),
+                problems.Count,
+                problems.Count > 0 ? problems.Min(q => q.GetStatus()) : QueueStatus.Ok);
+        }).ToList();
+
+    private Task QueuePropertiesReceived(string serverName, QueuePropertiesResult result)
+        => InvokeAsync(() =>  // event is not raised on the UI thread
+        {
+            _models[serverName] = result.ToQueueInfoModels().ToList();
+            StateHasChanged();
+        });
+
+    private Task HistorySampled() => InvokeAsync(StateHasChanged);
+
+    private void QueuesDeleted(QueueDeletion deletion)
+    {
+        if (_models.TryGetValue(ServerName, out var queues))
+        {
+            foreach (var queue in queues.Where(q => deletion.QueueNames.Contains(q.QueueName)))
+            {
+                switch (deletion.RemoveType)
+                {
+                    case RemoveType.Messages:
+                        queue.QueueLength = 0;
+                        queue.UnconfirmedItems = 0;
+                        break;
+                    case RemoveType.UnconfirmedMessages:
+                        queue.UnconfirmedItems = 0;
+                        break;
+                }
+            }
+
+            if (deletion.RemoveType == RemoveType.Queue)
+            {
+                queues.RemoveAll(q => deletion.QueueNames.Contains(q.QueueName));
+            }
+        }
+
+        if (deletion.RemoveType == RemoveType.Queue
+            && _selectedQueue is not null
+            && deletion.QueueNames.Contains(_selectedQueue))
+        {
+            CloseQueue();
+        }
+    }
+
+    #endregion
+
+    #region Navigation
+
+    private async Task ApplyDeepLink()
+    {
+        var query = HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+
+        var server = query["server"];
+        if (!string.IsNullOrEmpty(server)
+            && server != ServerName
+            && DashboardService.QueueServersNames.Contains(server))
+        {
+            await DashboardService.SetSelectedServerName(server);
+        }
+
+        var queue = query["queue"];
+        _selectedQueue = string.IsNullOrEmpty(queue) ? null : queue;
+
+        var tab = query["tab"];
+        _tab = tab is not null && DetailTabs.All.Contains(tab) ? tab : DetailTabs.Overview;
+    }
+
+    private void UpdateUrl()
+    {
+        var uri = Nav.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["server"] = ServerName,
+            ["queue"] = _selectedQueue,
+            ["tab"] = _selectedQueue is not null && _tab != DetailTabs.Overview ? _tab : null
+        });
+
+        Nav.NavigateTo(uri, replace: true);
+    }
+
+    private async Task SelectServer(string serverName)
+    {
+        if (serverName != ServerName)
+        {
+            await DashboardService.SetSelectedServerName(serverName);
+        }
+
+        _selectedQueue = null;
+        _tab = DetailTabs.Overview;
+        UpdateUrl();
+    }
+
+    private void OpenQueue(string queueName)
+    {
+        if (_selectedQueue != queueName)
+        {
+            _selectedQueue = queueName;
+            _tab = DetailTabs.Overview;
+        }
+
+        UpdateUrl();
+    }
+
+    private void CloseQueue()
+    {
+        _selectedQueue = null;
+        _tab = DetailTabs.Overview;
+        UpdateUrl();
+    }
+
+    private void SelectTab(string tab)
+    {
+        _tab = tab;
+        UpdateUrl();
+    }
+
+    #endregion
+
+    #region Appearance
+
+    private async Task ToggleDarkMode()
     {
         _isDarkMode = !_isDarkMode;
+        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, _isDarkMode ? "dark" : "light");
+    }
+
+    private async Task ToggleSidebar()
+    {
+        _sidebarCollapsed = !_sidebarCollapsed;
+        await JS.InvokeVoidAsync("localStorage.setItem", SidebarStorageKey, _sidebarCollapsed ? "collapsed" : "expanded");
+    }
+
+    #endregion
+
+    public void Dispose()
+    {
+        QueryEvents.OnQueuePropertiesResultAsync -= QueuePropertiesReceived;
+        History.OnSampledAsync -= HistorySampled;
     }
 }

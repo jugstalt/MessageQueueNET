@@ -1,0 +1,64 @@
+@using System.Globalization
+@using System.Text
+
+<svg class="mq-spark @Class" style="@Style" width="@(Responsive ? "100%" : Width.ToString())" height="@Height"
+     viewBox="0 0 @Width @Height" preserveAspectRatio="none" aria-hidden="true">
+    @if (Values is { Count: > 1 })
+    {
+        @if (Area)
+        {
+            <path d="@AreaPath()" fill="@Color" fill-opacity="0.15" stroke="none" />
+        }
+        <polyline points="@Points()" fill="none" stroke="@Color" stroke-width="@StrokeWidth"
+                  vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+    }
+    else
+    {
+        <line x1="0" x2="@Width" y1="@(Height - 1)" y2="@(Height - 1)" stroke="var(--mud-palette-lines-default)"
+              stroke-dasharray="2 3" vector-effect="non-scaling-stroke" />
+    }
+</svg>
+
+@code {
+    [Parameter] public IReadOnlyList<int>? Values { get; set; }
+    [Parameter] public int Width { get; set; } = 60;
+    [Parameter] public int Height { get; set; } = 18;
+    [Parameter] public bool Responsive { get; set; }
+    [Parameter] public bool Area { get; set; } = true;
+    [Parameter] public double StrokeWidth { get; set; } = 1.5;
+    [Parameter] public string Color { get; set; } = "var(--mud-palette-primary)";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string? Style { get; set; }
+
+    private IEnumerable<(double x, double y)> Coordinates()
+    {
+        var values = Values!;
+        int max = Math.Max(1, values.Max());
+        double stepX = (double)Width / (QueueHistoryService.Capacity - 1);
+        double offsetX = Width - stepX * (values.Count - 1);   // right aligned: newest value at the right edge
+
+        for (int i = 0; i < values.Count; i++)
+        {
+            yield return (offsetX + i * stepX, Height - 1 - (Height - 2) * (double)values[i] / max);
+        }
+    }
+
+    private string Points()
+        => string.Join(" ", Coordinates().Select(c => Format(c.x, c.y)));
+
+    private string AreaPath()
+    {
+        var coordinates = Coordinates().ToArray();
+        var sb = new StringBuilder();
+        sb.Append($"M{Format(coordinates[0].x, Height)}");
+        foreach (var c in coordinates)
+        {
+            sb.Append($" L{Format(c.x, c.y)}");
+        }
+        sb.Append($" L{Format(coordinates[^1].x, Height)} Z");
+        return sb.ToString();
+    }
+
+    private static string Format(double x, double y)
+        => string.Create(CultureInfo.InvariantCulture, $"{x:0.##},{y:0.##}");
+}

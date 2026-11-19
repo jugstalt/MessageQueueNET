@@ -1,21 +1,19 @@
 @using MessageQueueNET.Client.Services.Abstraction;
 @inject IMessageQueueApiVersionService VersionService
 
-<table style="width:100%">
-    <tr>
-        <td>
-            Version @VersionService.Version
-        </td>
-        <td style="text-align:center">
-            Timezone: @TimeZone
-        </td>
-        <td style="text-align:right">
-            <a href="@RepoUrl" target="_blank">GitHub Repository</a>
-        </td>
-    </tr>
-</table>
+<footer class="mq-footer">
+    <span>@Queues.Count Queues</span>
+    <span>@Queues.Sum(q => q.QueueLength).ToNumberText() Items</span>
+    <span>@Queues.Sum(q => q.UnconfirmedItems ?? 0).ToNumberText() Unconfirmed</span>
+    <span class="mq-spacer"></span>
+    <span>Timezone: @TimeZone</span>
+    <span>Version @VersionService.Version</span>
+    <a href="@RepoUrl" target="_blank">GitHub Repository</a>
+</footer>
 
 @code {
+    [Parameter] public IReadOnlyList<QueueInfoModel> Queues { get; set; } = [];
+
     private string TimeZone => TimeZoneInfo.Local.ToString();
     private const string RepoUrl = "https://github.com/jugstalt/messagequeuenet";
 }

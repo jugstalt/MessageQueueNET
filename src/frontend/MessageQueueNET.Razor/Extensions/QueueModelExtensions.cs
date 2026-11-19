@@ -24,6 +24,7 @@ static internal class QueueModelExtensions
 
             ConfirmationPeriodSeconds = queuePropertiesResult.Queues[q].ConfirmationPeriodSeconds,
             MaxUnconfirmedItems = queuePropertiesResult.Queues[q].MaxUnconfirmedItems,
+            MaxUnconfirmedItemsStrategy = queuePropertiesResult.Queues[q].MaxUnconfirmedItemsStrategy,
             DequeuingClients = queuePropertiesResult.Queues[q].DequeuingClients
         }) ?? Array.Empty<QueueInfoModel>();
 

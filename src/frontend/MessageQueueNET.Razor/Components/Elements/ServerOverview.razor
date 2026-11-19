@@ -1,0 +1,75 @@
+@inject QueueHistoryService History
+
+<div class="mq-detail-body">
+    <h2 style="margin:0 0 14px;font-size:18px;font-weight:600">
+        @ServerName <span class="mq-muted mq-mono" style="font-size:12px;font-weight:400">@ServerUrl</span>
+    </h2>
+
+    @if (!Loaded)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+        <div class="mq-empty">Connecting to server…</div>
+    }
+    else
+    {
+        var problems = Queues.Where(q => q.IsProblem())
+                             .OrderBy(q => q.GetStatus())
+                             .ThenBy(q => q.QueueName)
+                             .ToList();
+
+        <div class="mq-kpis">
+            <div class="mq-card mq-kpi"><div class="label">Queues</div><div class="value">@Queues.Count.ToNumberText()</div></div>
+            <div class="mq-card mq-kpi"><div class="label">Items</div><div class="value">@Queues.Sum(q => q.QueueLength).ToNumberText()</div></div>
+            <div class="mq-card mq-kpi"><div class="label">Unconfirmed</div><div class="value">@Queues.Sum(q => q.UnconfirmedItems ?? 0).ToNumberText()</div></div>
+            <div class="mq-card mq-kpi">
+                <div class="label">Problems</div>
+                <div class="value @(problems.Count > 0 ? (problems.Any(q => q.GetStatus() == QueueStatus.Error) ? "mq-text-error" : "mq-text-warn") : "mq-text-ok")">@problems.Count</div>
+            </div>
+        </div>
+
+        <div class="mq-card">
+            <div class="mq-card-title">
+                <span>Total items</span>
+                <span class="mq-muted" style="font-weight:400;font-size:11px">client-side, since page load</span>
+            </div>
+            <QueueChart Values="History.ServerHistory(ServerName)" Height="120" />
+        </div>
+
+        <div class="mq-card">
+            <div class="mq-card-title"><span>Needs attention</span></div>
+            @if (problems.Count == 0)
+            {
+                <div class="mq-muted" style="padding:10px 0 0"><span class="mq-text-ok">✓</span> All good.</div>
+            }
+            else
+            {
+                <table class="mq-grid" style="margin-top:6px">
+                    <thead><tr><th></th><th>Queue</th><th>Status</th><th class="num">Items</th><th class="num">Unc.</th></tr></thead>
+                    <tbody>
+                        @foreach (var queue in problems)
+                        {
+                            var status = queue.GetStatus();
+                            <tr class="item" @onclick="() => OnOpen.InvokeAsync(queue.QueueName)">
+                                <td style="width:14px"><span class="mq-dot @status.CssClass()"></span></td>
+                                <td class="mq-mono">@queue.QueueName</td>
+                                <td class="mq-text-@status.CssClass()" title="@status.Description()">@status.DisplayText()</td>
+                                <td class="num">@queue.QueueLength.ToNumberText()</td>
+                                <td class="num">@queue.UnconfirmedText()</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="mq-muted" style="margin-top:12px">Select a queue in the list to see details, messages and settings.</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string ServerName { get; set; } = "";
+    [Parameter] public string? ServerUrl { get; set; }
+    [Parameter] public IReadOnlyList<QueueInfoModel> Queues { get; set; } = [];
+    [Parameter] public bool Loaded { get; set; }
+    [Parameter] public EventCallback<string> OnOpen { get; set; }
+}

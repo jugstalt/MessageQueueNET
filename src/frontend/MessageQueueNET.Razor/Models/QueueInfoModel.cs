@@ -1,6 +1,8 @@
-﻿namespace MessageQueueNET.Razor.Models;
+using MessageQueueNET.Client;
 
-internal class QueueInfoModel
+namespace MessageQueueNET.Razor.Models;
+
+public class QueueInfoModel
 {
     public string QueueName { get; set; } = "";
 
@@ -21,5 +23,6 @@ internal class QueueInfoModel
 
     public int ConfirmationPeriodSeconds { get; set; }
     public int? MaxUnconfirmedItems { get; set; }
+    public MaxUnconfirmedItemsStrategy MaxUnconfirmedItemsStrategy { get; set; }
     public IDictionary<string, int>? DequeuingClients { get; set; }
 }

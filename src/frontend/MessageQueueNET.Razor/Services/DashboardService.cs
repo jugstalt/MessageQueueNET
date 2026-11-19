@@ -30,6 +30,7 @@ internal class DashboardService
 
     public string SelectedServerName { get; private set; }
     public string? SelectedServerFilter => _options.Queues?.FirstOrDefault(q => q.Name == SelectedServerName)?.Filter;
+    public string? SelectedServerUrl => _options.Queues?.FirstOrDefault(q => q.Name == SelectedServerName)?.Url;
 
     async public Task SetSelectedServerName(string serverName)
     {
