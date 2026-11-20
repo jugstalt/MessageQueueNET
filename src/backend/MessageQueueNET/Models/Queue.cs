@@ -12,6 +12,7 @@ namespace MessageQueueNET.Models
         // _nestedQueue is replaced by TryDelete => all mutations are synchronized
         private volatile ConcurrentQueue<QueueItem> _nestedQueue;
         private readonly object _syncRoot = new object();
+        private bool _removed;
 
         public Queue(string name)
         {
@@ -60,11 +61,52 @@ namespace MessageQueueNET.Models
             }
         }
 
-        public void Enqueue(QueueItem item)
+        // false, if the queue was marked for removal in the meantime => the caller has to get the queue again
+        public bool Enqueue(QueueItem item) => EnqueueRange(new[] { item });
+
+        public bool EnqueueRange(IEnumerable<QueueItem> items)
         {
             lock (_syncRoot)
             {
-                _nestedQueue.Enqueue(item);
+                if (_removed)
+                {
+                    return false;
+                }
+
+                foreach (var item in items)
+                {
+                    _nestedQueue.Enqueue(item);
+                }
+
+                return true;
+            }
+        }
+
+        public bool IsRemoved
+        {
+            get { lock (_syncRoot) { return _removed; } }
+        }
+
+        // Marks the queue for removal, if it has no valid items. After that, no items can be enqueued anymore.
+        public bool TryMarkForRemoval(Func<QueueItem, bool> isValid)
+        {
+            lock (_syncRoot)
+            {
+                if (_nestedQueue.Any(isValid))
+                {
+                    return false;
+                }
+
+                _removed = true;
+                return true;
+            }
+        }
+
+        public void CancelRemoval()
+        {
+            lock (_syncRoot)
+            {
+                _removed = false;
             }
         }
 

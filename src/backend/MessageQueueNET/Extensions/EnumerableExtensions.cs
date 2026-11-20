@@ -41,7 +41,13 @@ namespace MessageQueueNET.Extensions
                     continue;
                 }
 
-                var oldestQueueItemTime = queue.Select(i => i.CreationDateUTC).Min();
+                // the queue can be emptied in parallel (delete, remove) => never use Min() on a possibly empty queue
+                var oldestQueueItemTime = queue.Select(i => (DateTime?)i.CreationDateUTC).Min();
+                if (oldestQueueItemTime == null)
+                {
+                    continue;
+                }
+
                 if (oldestItemTime == null || oldestQueueItemTime < oldestItemTime)
                 {
                     oldestItemTime = oldestQueueItemTime;

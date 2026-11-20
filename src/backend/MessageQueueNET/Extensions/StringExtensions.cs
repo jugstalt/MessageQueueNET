@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 ﻿using System.Text.RegularExpressions;
 
 namespace MessageQueueNET.Extensions;
@@ -9,6 +10,10 @@ public static class StringExtensions
 
     private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(100);
     private static readonly Regex MultipleWildcards = new Regex(@"\*{2,}", RegexOptions.Compiled);
+
+    // patterns come from requests => the cache is limited
+    private const int MaxCachedRegexes = 1000;
+    private static readonly ConcurrentDictionary<string, Regex> RegexCache = new();
 
     // Must start with [a-z0-9]; a '.' must be followed by a non-dot character
     // => no ".", "..", leading/trailing dots or consecutive dots (prevents path traversal)
@@ -30,7 +35,14 @@ public static class StringExtensions
     {
         try
         {
-            return Regex.IsMatch(aString, regexPattern, RegexOptions.CultureInvariant, RegexMatchTimeout);
+            if (RegexCache.Count >= MaxCachedRegexes)
+            {
+                RegexCache.Clear();
+            }
+
+            var regex = RegexCache.GetOrAdd(regexPattern, p => new Regex(p, RegexOptions.CultureInvariant, RegexMatchTimeout));
+
+            return regex.IsMatch(aString);
         }
         catch (RegexMatchTimeoutException)
         {

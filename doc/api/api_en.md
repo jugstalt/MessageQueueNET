@@ -143,9 +143,8 @@ The API also allows users to query multiple queues at once using an `idPattern`.
 ### /Queue/dequeue/{idPattern}
 
 Getting values from a waiting snake. The number of values can be specified via `count` (default: 1). If messages are picked up from a queue that does not exist,
-an empty array `[]` is returned. This does not create a new queue with the name `{id}`. 
-If you want to query a queue and at the same time create this queue even if it does not already exist, this is ensured by the parameter `register=true`.
-The queue is therefore still empty, however, other processes can use '/queue/queuenames' (see below) to determine that this queue has already been queried and that thers is a process to handle the messages.
+an empty array `[]` is returned and the queue is created (same as with `enqueue` and `register`), so other processes can use '/queue/queuenames' (see below) to determine that this queue has already been queried and that there is a process to handle the messages.
+The parameter `register` is kept for compatibility and has no effect.
 
 When values are queried using this method, they automatically disappear from the queue and are no longer available for other processes.
 
@@ -153,7 +152,7 @@ When values are queried using this method, they automatically disappear from the
 - **Parameters**:
   - `idPattern`: String (path, required) - Pattern to match queue IDs.
   - `count`: Integer (query, optional, default=1) - Number of messages to dequeue (limited by `MaxDequeueCount`).
-  - `register`: Boolean (query, optional, default=false) - Indicates whether to register the queue if it doesn't exist.
+  - `register`: Boolean (query, optional, default=false) - No effect; queues are always created on dequeue (kept for compatibility).
 
 #### Example
 

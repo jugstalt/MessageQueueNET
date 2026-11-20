@@ -8,13 +8,13 @@ namespace MessageQueueNET.Client.Abstractions
 {
     public interface IQueueClient
     {
-        Task<MessagesResult> AllMessagesAsync(int max = 0, bool unconfirmedOnly = false);
+        Task<MessagesResult> AllMessagesAsync(int max = 0, bool unconfirmedOnly = false, CancellationToken? cancelationToken = null);
 
-        Task<InfoResult> ApiInfoAsync();
+        Task<InfoResult> ApiInfoAsync(CancellationToken? cancelationToken = null);
 
-        Task<ApiResult> ConfirmDequeueAsync(Guid messageId);
+        Task<ApiResult> ConfirmDequeueAsync(Guid messageId, CancellationToken? cancelationToken = null);
 
-        Task<ApiResult> DeleteMessage(Guid messageId);
+        Task<ApiResult> DeleteMessage(Guid messageId, CancellationToken? cancelationToken = null);
 
         Task<MessagesResult> DequeueAsync(
             int count = 1,
@@ -24,9 +24,9 @@ namespace MessageQueueNET.Client.Abstractions
             int? maxPollingSeconds = null
         );
 
-        Task<ApiResult> EnqueueAsync(IEnumerable<string> messages);
+        Task<ApiResult> EnqueueAsync(IEnumerable<string> messages, CancellationToken? cancelationToken = null);
 
-        Task<QueueLengthResult> LengthAsync();
+        Task<QueueLengthResult> LengthAsync(CancellationToken? cancelationToken = null);
 
         Task<QueuePropertiesResult> PropertiesAsync(
             CancellationToken? cancelationToken = null,
@@ -35,7 +35,7 @@ namespace MessageQueueNET.Client.Abstractions
             bool? silentAccess = null
         );
 
-        Task<QueueNamesResult> QueueNamesAsync();
+        Task<QueueNamesResult> QueueNamesAsync(CancellationToken? cancelationToken = null);
 
         Task<QueuePropertiesResult> RegisterAsync(
             int? lifetimeSeconds = null,
@@ -44,9 +44,10 @@ namespace MessageQueueNET.Client.Abstractions
             int? maxUnconfirmedItems = null,
             MaxUnconfirmedItemsStrategy? maxUnconfirmedItemsStrategy = null,
             bool? suspendEnqueue = null,
-            bool? suspendDequeue = null
+            bool? suspendDequeue = null,
+            CancellationToken? cancelationToken = null
         );
 
-        Task<ApiResult> RemoveAsync(RemoveType removeType = RemoveType.Queue);
+        Task<ApiResult> RemoveAsync(RemoveType removeType = RemoveType.Queue, CancellationToken? cancelationToken = null);
     }
 }

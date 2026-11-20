@@ -64,6 +64,26 @@ All notable changes to this project are documented in this file.
 - The background maintenance service no longer blocks threads (`.Result`) and stops immediately on shutdown; errors are logged instead of swallowed.
 - Queues are restored asynchronously before the application starts; invalid queues are logged and skipped instead of stopping the restore.
 - Removed the unused `Program_old.cs`.
+- **No lost messages**:
+  - `dequeue`: if the dequeue state cannot be persisted, the message is put back into the queue (and removed from the unconfirmed items) instead of being dropped. Messages already collected are still returned.
+  - `enqueue` is all or nothing: if one message cannot be persisted, the already persisted ones are removed again and nothing is enqueued.
+  - A queue removed by its `LifetimeSeconds` no longer swallows messages enqueued at the same moment (the queue is created again).
+  - `QueuePersistNone.RemoveQueueItem` returned `false`; with `Persist:Type` `none` no message could be dequeued.
+- `dequeue` on a queue with items that are removed in parallel no longer fails with an `InvalidOperationException`.
+- `MaxQueues` is also enforced for parallel requests.
+- Queue pattern matching: regexes are cached, queue names are collected without quadratic lookups.
+- `QueuesService` logs errors instead of swallowing them. `RemoveQueue` returns whether the queue existed.
+- `DequeuingClientsCount` and `DequeuingClients` return `0`/empty (instead of `null`) for queues with confirmation but no unconfirmed items; `null` only means that confirmation is not used.
+- Client library (`MessageQueueNET.Client`):
+  - Basic authentication credentials are encoded as UTF-8 (umlauts in passwords).
+  - Queue names/patterns are URL-escaped.
+  - Non-success responses throw `MessageQueueClientException` (derives from `Exception`) with the `StatusCode`.
+  - All `IQueueClient` methods accept an optional `CancellationToken`.
+  - Removed the dead certificate validation bypass in the `QueueClient` constructor.
+
+### Documentation
+
+- `dequeue` always creates a missing queue; the parameter `register` has no effect (documentation said the opposite).
 
 ### Tests
 

@@ -38,7 +38,7 @@ namespace MessageQueueNET.Services
             => Task.FromResult(true);
 
         public Task<bool> RemoveQueueItem(string queueName, Guid itemId)
-            => Task.FromResult(false);
+            => Task.FromResult(true);
 
     }
 }

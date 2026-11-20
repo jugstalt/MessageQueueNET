@@ -28,17 +28,9 @@ public class QueueClient : IQueueClient
     public QueueClient(MessageQueueConnection connection, string queueName,
                        HttpClient? httpClient = null)
     {
-        if (httpClient == null && ReuseableHttpClient == null)
-        {
-            ReuseableHttpClient = new HttpClient(new HttpClientHandler()
-            {
-                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
-            });
-        }
-
         _httpClient = httpClient ?? ReuseableHttpClient;
         _apiUrl = connection.ApiUrl;
-        _queueName = queueName;
+        _queueName = Uri.EscapeDataString(queueName);
 
         var uri = new Uri(_apiUrl);
         var userInfo = uri.UserInfo;
@@ -71,13 +63,13 @@ public class QueueClient : IQueueClient
         };
     }
 
-    async public Task<InfoResult> ApiInfoAsync()
+    async public Task<InfoResult> ApiInfoAsync(CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/info"))
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -106,13 +98,13 @@ public class QueueClient : IQueueClient
         }
     }
 
-    async public Task<ApiResult> ConfirmDequeueAsync(Guid messageId)
+    async public Task<ApiResult> ConfirmDequeueAsync(Guid messageId, CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"{_apiUrl}/queue/confirmdequeue/{_queueName}?messageId={messageId}"))
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -121,7 +113,7 @@ public class QueueClient : IQueueClient
         }
     }
 
-    async public Task<ApiResult> EnqueueAsync(IEnumerable<string> messages)
+    async public Task<ApiResult> EnqueueAsync(IEnumerable<string> messages, CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Put, $"{_apiUrl}/queue/enqueue/{_queueName}"))
         {
@@ -132,7 +124,7 @@ public class QueueClient : IQueueClient
                 Encoding.UTF8,
                 "application/json");
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -141,13 +133,13 @@ public class QueueClient : IQueueClient
         }
     }
 
-    async public Task<ApiResult> DeleteMessage(Guid messageId)
+    async public Task<ApiResult> DeleteMessage(Guid messageId, CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/queue/deletemessage/{_queueName}?messageId={messageId}"))
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -156,13 +148,13 @@ public class QueueClient : IQueueClient
         }
     }
 
-    async public Task<MessagesResult> AllMessagesAsync(int max = 0, bool unconfirmedOnly = false)
+    async public Task<MessagesResult> AllMessagesAsync(int max = 0, bool unconfirmedOnly = false, CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/all/{_queueName}?max={max}&unconfirmedOnly={unconfirmedOnly}"))
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -171,28 +163,28 @@ public class QueueClient : IQueueClient
         }
     }
 
-    async public Task<QueueLengthResult> LengthAsync()
+    async public Task<QueueLengthResult> LengthAsync(CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/length/{_queueName}"))
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
-                return Result.Deserialize<QueueLengthResult>(await httpResponse.Content.ReadAsStringAsync(), _jsonOptions); ;
+                return Result.Deserialize<QueueLengthResult>(await httpResponse.Content.ReadAsStringAsync(), _jsonOptions);
             }
         }
     }
 
-    async public Task<ApiResult> RemoveAsync(RemoveType removeType = RemoveType.Queue)
+    async public Task<ApiResult> RemoveAsync(RemoveType removeType = RemoveType.Queue, CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/queue/remove/{_queueName}?removeType={removeType}"))
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -207,7 +199,8 @@ public class QueueClient : IQueueClient
                                                            int? maxUnconfirmedItems = null,
                                                            MaxUnconfirmedItemsStrategy? maxUnconfirmedItemsStrategy = null,
                                                            bool? suspendEnqueue = null,
-                                                           bool? suspendDequeue = null)
+                                                           bool? suspendDequeue = null,
+                                                           CancellationToken? cancelationToken = null)
     {
         List<string> urlParameters = new List<string>();
 
@@ -244,7 +237,7 @@ public class QueueClient : IQueueClient
         {
             ModifyHttpRequest(requestMessage);
 
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -273,12 +266,12 @@ public class QueueClient : IQueueClient
         }
     }
 
-    async public Task<QueueNamesResult> QueueNamesAsync()
+    async public Task<QueueNamesResult> QueueNamesAsync(CancellationToken? cancelationToken = null)
     {
         using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/queuenames"))
         {
             ModifyHttpRequest(requestMessage);
-            using (var httpResponse = await _httpClient.SendAsync(requestMessage))
+            using (var httpResponse = await _httpClient.SendAsync(requestMessage, cancelationToken ?? CancellationToken.None))
             {
                 CheckHttpResponse(httpResponse);
 
@@ -302,7 +295,7 @@ public class QueueClient : IQueueClient
         {
             // Add Basic Auth
             var authenticationString = $"{_clientId}:{_clientSecret}";
-            var base64EncodedAuthenticationString = Convert.ToBase64String(System.Text.ASCIIEncoding.ASCII.GetBytes(authenticationString));
+            var base64EncodedAuthenticationString = Convert.ToBase64String(Encoding.UTF8.GetBytes(authenticationString));
 
             requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Basic", base64EncodedAuthenticationString);
         }
@@ -330,7 +323,9 @@ public class QueueClient : IQueueClient
     {
         if (!httpResponse.IsSuccessStatusCode)
         {
-            throw new Exception($"Error connecting with queue message service. Status code: {httpResponse.StatusCode}");
+            throw new MessageQueueClientException(
+                $"Error connecting with queue message service. Status code: {httpResponse.StatusCode}",
+                httpResponse.StatusCode);
         }
     }
 

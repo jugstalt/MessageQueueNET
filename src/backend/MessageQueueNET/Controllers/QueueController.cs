@@ -66,6 +66,7 @@ namespace MessageQueueNET.Controllers
 
                 List<MessageResult> items = new List<MessageResult>();
                 List<Queue> queueBag = new List<Queue>();
+                var persistError = false;
 
                 using (var mutex = await MessageQueueFuzzyMutexAsync.LockAsync("dequeue", queryQueues.Select(q => q.Name).ToArray()))
                 {
@@ -88,28 +89,54 @@ namespace MessageQueueNET.Controllers
                                 continue;
                             }
 
+                            QueueItem? unconfirmedItem = null;
+                            var persisted = true;
+
                             if (queue.Properties.ConfirmationPeriodSeconds > 0)
                             {
-                                var unconfirmedItem = item.CloneForUnconfirmed(clientId);
-                                if (!await _persist.PersistUnconfirmedQueueItem(queue.Name, unconfirmedItem))
+                                unconfirmedItem = item.CloneForUnconfirmed(clientId);
+                                persisted = await _persist.PersistUnconfirmedQueueItem(queue.Name, unconfirmedItem);
+
+                                if (persisted)
                                 {
-                                    throw new Exception("Unable to persist unconfirmed queue item");
+                                    _queues.AddToUnconfirmedMessage(queue, unconfirmedItem);
+                                }
+                            }
+
+                            persisted = persisted && await _persist.RemoveQueueItem(queue.Name, item.Id);
+
+                            if (!persisted)
+                            {
+                                // not delivered => put the message back, it must not get lost
+                                if (unconfirmedItem != null)
+                                {
+                                    _queues.RemoveFromUnconfirmedMessages(queue, item.Id);
+                                    await _persist.RemoveUnconfirmedQueueItem(queue.Name, item.Id);
                                 }
 
-                                _queues.AddToUnconfirmedMessage(queue, unconfirmedItem);
+                                queue.Enqueue(item);
+                                persistError = true;
+                                break;
                             }
 
-                            if (await _persist.RemoveQueueItem(queue.Name, item.Id))
+                            items.Add(new MessageResult()
                             {
-                                items.Add(new MessageResult()
-                                {
-                                    Queue = queue.Name,
-                                    Id = item.Id,
-                                    Value = item.Message,
-                                    RequireConfirmation = queue.Properties.RequireConfirmation() ? true : null,
-                                    ConfirmationPeriod = queue.Properties.RequireConfirmation() ? queue.Properties.ConfirmationPeriodSeconds : null,
-                                });
-                            }
+                                Queue = queue.Name,
+                                Id = item.Id,
+                                Value = item.Message,
+                                RequireConfirmation = queue.Properties.RequireConfirmation() ? true : null,
+                                ConfirmationPeriod = queue.Properties.RequireConfirmation() ? queue.Properties.ConfirmationPeriodSeconds : null,
+                            });
+                        }
+                    }
+
+                    if (persistError)
+                    {
+                        _logger.LogError("Dequeue: unable to persist the dequeue state, the message was put back to the queue");
+
+                        if (items.Count == 0)
+                        {
+                            throw new Exception("Unable to persist dequeue state");
                         }
                     }
 
@@ -177,30 +204,52 @@ namespace MessageQueueNET.Controllers
                     throw new MessageQueueException($"Message exceeds the maximum size of {limits.MaxMessageBytes} bytes");
                 }
 
-                var queue = _queues.GetQueue(id);
+                var items = messageArray.Select(m => new QueueItem() { Message = m }).ToArray();
+                Queue queue;
 
-                if (queue.Properties.SuspendEnqueue == true)
+                // a queue that is removed in parallel (lifetime) does not accept items => get it again
+                for (int attempt = 0; ; attempt++)
                 {
-                    throw new MessageQueueException($"Enqueue suspended");
-                }
+                    queue = _queues.GetQueue(id);
 
-                if (limits.MaxQueueLength > 0
-                    && queue.Count + messageArray.Length > limits.MaxQueueLength)
-                {
-                    throw new MessageQueueException($"Maximum queue length ({limits.MaxQueueLength}) exceeded");
-                }
-
-                foreach (var message in messageArray)
-                {
-                    var item = new QueueItem() { Message = message };
-                    if (!await _persist.PersistQueueItem(id, item))
+                    if (queue.Properties.SuspendEnqueue == true)
                     {
-                        throw new Exception($"Error when persisting item");
+                        throw new MessageQueueException($"Enqueue suspended");
                     }
 
-                    queue.Enqueue(item);
-                }
+                    if (limits.MaxQueueLength > 0
+                        && queue.Count + items.Length > limits.MaxQueueLength)
+                    {
+                        throw new MessageQueueException($"Maximum queue length ({limits.MaxQueueLength}) exceeded");
+                    }
 
+                    // all or nothing: persist every item first, enqueue only if all are persisted
+                    var persisted = new List<QueueItem>();
+                    foreach (var item in items)
+                    {
+                        if (!await _persist.PersistQueueItem(queue.Name, item))
+                        {
+                            foreach (var persistedItem in persisted)
+                            {
+                                await _persist.RemoveQueueItem(queue.Name, persistedItem.Id);
+                            }
+
+                            throw new Exception($"Error when persisting item");
+                        }
+
+                        persisted.Add(item);
+                    }
+
+                    if (queue.EnqueueRange(items))
+                    {
+                        break;
+                    }
+
+                    if (attempt >= 2)
+                    {
+                        throw new Exception("Queue was removed while enqueuing");
+                    }
+                }
                 queue.SetModified();
 
                 return new ApiResult(queue.CalcHashCode());
@@ -372,7 +421,7 @@ namespace MessageQueueNET.Controllers
                         {
                             if (await _persist.RemoveQueue(queue.Name))
                             {
-                                result.Success &= _queues.RemoveQueue(queue.Name);
+                                _queues.RemoveQueue(queue.Name);
                             }
                             else { result.Success = false; }
                         }

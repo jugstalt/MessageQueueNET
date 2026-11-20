@@ -2,6 +2,8 @@ using MessageQueueNET.Exceptions;
 ﻿using MessageQueueNET.Extensions;
 using MessageQueueNET.Models;
 using MessageQueueNET.Services.Abstraction;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Concurrent;
@@ -16,9 +18,13 @@ public class QueuesService
     private readonly ConcurrentDictionary<string, Queue> _queues;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, QueueItem>> _unconfirmedItems;
     private readonly MessageQueueLimitsOptions _limits;
+    private readonly ILogger<QueuesService> _logger;
+    private readonly object _createSyncRoot = new object();
 
-    public QueuesService(IOptions<MessageQueueLimitsOptions> limits)
+    public QueuesService(IOptions<MessageQueueLimitsOptions> limits,
+                         ILogger<QueuesService>? logger = null)
     {
+        _logger = logger ?? NullLogger<QueuesService>.Instance;
         _queues = new ConcurrentDictionary<string, Queue>();
         _unconfirmedItems = new ConcurrentDictionary<string, ConcurrentDictionary<Guid, QueueItem>>();
         _limits = limits.Value;
@@ -38,25 +44,30 @@ public class QueuesService
             return new Queue[] { GetQueue(queueNamePattern, forAccess) };
         }
 
-        List<Queue> queues = new List<Queue>();
+        return MatchingQueueNames(queueNamePattern)
+                    .ToArray()
+                    .Select(name => GetQueue(name, forAccess))
+                    .ToList();
+    }
+
+    // each existing queue name once, even if it fits more than one pattern
+    private IEnumerable<string> MatchingQueueNames(string queueNamePattern)
+    {
+        var keys = _queues.Keys;
+        var found = new HashSet<string>();
 
         foreach (var pattern in queueNamePattern.Split(',').Select(p => p.Trim()))
         {
             string regexPattern = pattern.ToRegexPattern();
 
-            foreach (var key in _queues.Keys)
+            foreach (var key in keys)
             {
-                if (key == pattern || key.FitsRegexPattern(regexPattern))
+                if ((key == pattern || key.FitsRegexPattern(regexPattern)) && found.Add(key))
                 {
-                    if (queues.Any(q => q.Name == key) == false)
-                    {
-                        queues.Add(GetQueue(key, forAccess));
-                    }
+                    yield return key;
                 }
             }
         }
-
-        return queues;
     }
 
     public Queue GetQueue(string queueName, bool forAccess = true)
@@ -69,15 +80,28 @@ public class QueuesService
             throw new MessageQueueException($"Invalid queue name. Allowed are lowercase characters, numbers, minus, underscore and single points between them (must start with a character or number, max. {StringExtensions.MaxQueueNameLength} characters)");
         }
 
-        if (!ignoreLimits
-            && _limits.MaxQueues > 0
-            && !_queues.ContainsKey(queueName)
-            && _queues.Count >= _limits.MaxQueues)
+        if (!_queues.TryGetValue(queueName, out var queue) || queue.IsRemoved)
         {
-            throw new MessageQueueException($"Maximum number of queues ({_limits.MaxQueues}) reached");
-        }
+            // creating is synchronized, so parallel requests cannot exceed MaxQueues
+            lock (_createSyncRoot)
+            {
+                var replaceRemoved = _queues.TryGetValue(queueName, out queue) && queue.IsRemoved;
 
-        var queue = _queues.GetOrAdd(queueName, (key) => new Queue(queueName));
+                if (queue is null || replaceRemoved)
+                {
+                    if (!replaceRemoved
+                        && !ignoreLimits
+                        && _limits.MaxQueues > 0
+                        && _queues.Count >= _limits.MaxQueues)
+                    {
+                        throw new MessageQueueException($"Maximum number of queues ({_limits.MaxQueues}) reached");
+                    }
+
+                    queue = new Queue(queueName);
+                    _queues[queueName] = queue;
+                }
+            }
+        }
 
         if (forAccess == true)
         {
@@ -99,34 +123,29 @@ public class QueuesService
             return _queues.ContainsKey(queueNamePattern);
         }
 
-        foreach (var pattern in queueNamePattern.Split(',').Select(x => x.Trim()))
-        {
-            string regexPattern = pattern.ToRegexPattern();
-            foreach (var key in _queues.Keys)
-            {
-                if (key == pattern || key.FitsRegexPattern(regexPattern))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return MatchingQueueNames(queueNamePattern).Any();
     }
 
+    // true, if the queue existed and was removed
     public bool RemoveQueue(string queueName)
     {
-        try
-        {
-            _queues.TryRemove(queueName, out _);
-            _unconfirmedItems.TryRemove(queueName, out ConcurrentDictionary<Guid, QueueItem>? unconfirmedItems);
+        var removed = _queues.TryRemove(queueName, out _);
+        _unconfirmedItems.TryRemove(queueName, out _);
 
-            return true;
-        }
-        catch
+        return removed;
+    }
+
+    // Removes exactly this instance: a queue that was created again in the meantime stays untouched
+    public bool RemoveQueue(Queue queue)
+    {
+        if (!_queues.TryRemove(new KeyValuePair<string, Queue>(queue.Name, queue)))
         {
             return false;
         }
+
+        _unconfirmedItems.TryRemove(queue.Name, out _);
+
+        return true;
     }
 
     public bool RemoveQueueMessages(Queue queue)
@@ -162,13 +181,18 @@ public class QueuesService
                 return unconfirmed.TryAdd(queueItem.Id, queueItem);
             }
         }
-        catch
+        catch (Exception ex)
         {
-
+            _logger.LogError(ex, "Error adding unconfirmed item to queue {Queue}", queue.Name);
         }
 
         return false;
     }
+
+    // Removes an item from the unconfirmed items without confirming it (eg. if dequeue could not be completed)
+    public bool RemoveFromUnconfirmedMessages(Queue queue, Guid messageId)
+        => _unconfirmedItems.TryGetValue(queue.Name, out var unconfirmedItems)
+           && unconfirmedItems.TryRemove(messageId, out _);
 
     async public Task<bool> ReEnqueueUnconfirmedMessages(Queue queue, IQueuesPersistService persist)
     {
@@ -202,8 +226,9 @@ public class QueuesService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Error re-enqueuing unconfirmed items of queue {Queue}", queue.Name);
             return false;
         }
     }
@@ -220,17 +245,21 @@ public class QueuesService
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-
+            _logger.LogError(ex, "Error confirming message {MessageId} of queue {Queue}", messageId, queue.Name);
         }
 
         return false;
     }
 
+    // null: confirmation is not used for this queue (counts and client lists are null then)
+    private static bool ConfirmationDisabled(Queue queue)
+        => queue?.Properties == null || queue.Properties.ConfirmationPeriodSeconds <= 0;
+
     public int? UnconfirmedMessagesCount(Queue queue, string? clientId)
     {
-        if (queue?.Properties == null || queue.Properties.ConfirmationPeriodSeconds <= 0)
+        if (ConfirmationDisabled(queue))
         {
             return null;
         }
@@ -252,7 +281,7 @@ public class QueuesService
 
     public int? DequeuingClientsCount(Queue queue)
     {
-        if (queue?.Properties == null || queue.Properties.ConfirmationPeriodSeconds <= 0)
+        if (ConfirmationDisabled(queue))
         {
             return null;
         }
@@ -262,31 +291,28 @@ public class QueuesService
             return unconfirmedItems.Select(i => i.Value?.DequeuingClientId).Distinct().Count();
         }
 
-        return null;
+        return 0;
     }
 
     public IDictionary<string, int>? UnconfirmedMessagesByClient(Queue queue)
     {
-        if (queue?.Properties == null || queue.Properties.ConfirmationPeriodSeconds <= 0)
+        if (ConfirmationDisabled(queue))
         {
             return null;
         }
 
+        var dict = new Dictionary<string, int>();
+
         if (_unconfirmedItems.TryGetValue(queue.Name, out ConcurrentDictionary<Guid, QueueItem>? unconfirmedItems))
         {
-            var dict = new Dictionary<string, int>();
-            var cliendIds = unconfirmedItems.Select(i => i.Value?.DequeuingClientId ?? String.Empty).Distinct();
-
-            foreach (var clientId in cliendIds)
+            foreach (var item in unconfirmedItems.Values.ToArray())
             {
-                dict[clientId] = unconfirmedItems
-                    .Count(i => (i.Value?.DequeuingClientId ?? String.Empty) == clientId);
+                var clientId = item?.DequeuingClientId ?? String.Empty;
+                dict[clientId] = dict.GetValueOrDefault(clientId) + 1;
             }
-
-            return dict;
         }
 
-        return null;
+        return dict;
     }
 
     public IEnumerable<Client.Models.MessageResult>? UnconfirmedItems(Queue queue)
@@ -309,9 +335,9 @@ public class QueuesService
                 return items.Count() > 0 ? items : null;
             }
         }
-        catch
+        catch (Exception ex)
         {
-
+            _logger.LogError(ex, "Error reading unconfirmed items of queue {Queue}", queue.Name);
         }
 
         return null;
@@ -352,8 +378,9 @@ public class QueuesService
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Error restoring queue {Queue}", queueName);
             return false;
         }
     }

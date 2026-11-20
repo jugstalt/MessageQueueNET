@@ -52,16 +52,18 @@ namespace MessageQueueNET.Services
                     }
 
                     if (queue.Properties.LifetimeSeconds > 0 &&
-                        (DateTime.UtcNow - queue.LastAccessUTC).TotalSeconds > queue.Properties.LifetimeSeconds)
+                        (DateTime.UtcNow - queue.LastAccessUTC).TotalSeconds > queue.Properties.LifetimeSeconds &&
+                        (_queues.UnconfirmedMessagesCount(queue, null) ?? 0) == 0 &&
+                        queue.TryMarkForRemoval(item => item.IsValid(queue)))
                     {
-                        var itemCount = queue.Where(item => item.IsValid(queue)).Count() +
-                                        (_queues.UnconfirmedMessagesCount(queue, null) ?? 0);
-                        if (itemCount == 0)
+                        // the queue accepts no items anymore => nothing enqueued in parallel gets lost
+                        if (await _persist.RemoveQueue(queue.Name))
                         {
-                            if (await _persist.RemoveQueue(queue.Name))
-                            {
-                                _queues.RemoveQueue(queue.Name);
-                            }
+                            _queues.RemoveQueue(queue);
+                        }
+                        else
+                        {
+                            queue.CancelRemoval();
                         }
                     }
                 }
