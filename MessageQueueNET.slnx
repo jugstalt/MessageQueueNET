@@ -4,6 +4,11 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Folder Name="/build/">
+    <Project Path="build/_build.csproj">
+      <Build Project="false" />
+    </Project>
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/aspire/">
     <Project Path="src/aspire/MessageQueueNET.AppHost/MessageQueueNET.AppHost.csproj" />

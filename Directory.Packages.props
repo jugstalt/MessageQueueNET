@@ -6,6 +6,7 @@
 
   <ItemGroup Label="Build">
     <PackageVersion Include="MinVer" Version="8.0.0" />
+    <PackageVersion Include="Nuke.Common" Version="10.1.0" />
   </ItemGroup>
 
   <ItemGroup Label="Microsoft.Extensions / ASP.NET Core">
