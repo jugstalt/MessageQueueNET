@@ -197,7 +197,7 @@ class Build : NukeBuild
 
                 var tags = ImageTags(image).ToArray();
                 var tagArgs = string.Join(' ', tags.Select(t => $"--tag {t}"));
-                Docker($"build --pull {tagArgs:nq} {context}");
+                Docker($"build --pull {tagArgs:nq} {context}", logger: LogContainerOutput);
                 Log.Information("Built {Tags}", tags);
             }
         });
@@ -208,7 +208,7 @@ class Build : NukeBuild
         {
             foreach (var tag in DockerImages.SelectMany(i => ImageTags(i.Image)))
             {
-                Docker($"push {tag}");
+                Docker($"push {tag}", logger: LogContainerOutput);
             }
         });
 
@@ -274,6 +274,9 @@ class Build : NukeBuild
             .SetPublishReadyToRun(true)
             .SetOutput(output));
     }
+
+    // docker/wslc write build progress to stderr; real failures are reported via the exit code
+    static void LogContainerOutput(OutputType type, string text) => Log.Information(text);
 
     static void CopyDirectory(AbsolutePath source, AbsolutePath target)
     {
