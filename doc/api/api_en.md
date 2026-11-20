@@ -4,6 +4,38 @@ The Rest API is a .NET Core API Web application. The application runs in both *M
 
 The API provides methods for creating and querying queues. Any queues can be created with a unique name (any string). Each of these queues is handled by different processes.
 
+## Installation
+
+### ZIP package
+
+Every [GitHub release](https://github.com/jugstalt/MessageQueueNET/releases) contains ZIP packages for `win-x64` and `linux-x64` (requires the ASP.NET Core 10 runtime):
+
+```
+<version>/
+  api/app/          # MessageQueueNET (REST API)
+  dashboard/app/    # MessageQueueNET.Blazor (dashboard)
+  cmd/              # MessageQueueNET.Cmd, MessageQueueNET.Processor
+  start-messagequeue(.bat|.sh)            # API on port 9091
+  start-messagequeue-dashboard(.bat|.sh)  # dashboard on port 9090
+```
+
+### Docker
+
+```
+docker run -p 9091:8080 -v mq-data:/home/app/messagequeue \
+  -e MESSAGEQUEUE__PERSIST__TYPE=filesystem -e MESSAGEQUEUE__PERSIST__ROOTPATH=/home/app/messagequeue/persist \
+  ghcr.io/jugstalt/messagequeue-net
+docker run -p 9090:8080 ghcr.io/jugstalt/messagequeue-net-dashboard
+```
+
+The images run as the non-root user `app` on port `8080`. Tags: `X.Y.Z`, `X.Y` and `latest` (preview versions only get their version tag).
+A complete example is [deploy/docker/docker-compose.yml](../../deploy/docker/docker-compose.yml).
+
+### OpenAPI / Scalar
+
+In the `Development` environment, or if `openApiUI` is `true` (environment variable `OPENAPIUI`), the API description is available at `/openapi/v1.json`
+and an interactive UI at `/scalar`. The old setting `swaggerUI` is still accepted as a fallback.
+
 ## Configuration
 
 The configuration is *JSON* formated in the *appsettings.json* or in the *_config/message-queue.json* file. It is recommended that the settings shown here are configured
@@ -72,7 +104,7 @@ For production use, configure `Basic` authentication (currently the only support
 Access is via `Basic Authentication` and can be specified via the *HTTP Header* (`Authorization: Basic base64(id:secret)`) or url format (`https://clientId:clientSecret@my-server`).
 Basic authentication transfers the credentials in plain text: use HTTPS (directly or via a TLS terminating reverse proxy).
 
-When authentication is enabled, every request requires valid credentials, including `/info` and the Swagger UI. Only the health check endpoints (`/health`, `/alive`) are anonymous.
+When authentication is enabled, every request requires valid credentials, including `/info`, the OpenAPI document and the Scalar UI. Only the health check endpoints (`/health`, `/alive`) are anonymous.
 
 **Secrets** can be configured in plain text or as SHA-256 hash: `"Secret": "sha256:<64 hex characters>"`. The hash can be created e.g. with
 `printf '%s' 'my-secret' | sha256sum` (Linux) or

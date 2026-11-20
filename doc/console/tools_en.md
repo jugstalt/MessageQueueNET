@@ -1,6 +1,15 @@
 # Commandline Tools
 
-The software package provides command line tools that allow access to the queues. Precompiled tools require a .NET Core 5.0 runtime environment.
+The software package provides command line tools that allow access to the queues. The tools are part of the ZIP packages (folder `cmd`, single files, require the .NET 10 runtime).
+
+`MessageQueueNET.Cmd` is also available as .NET tool (requires the .NET 10 runtime):
+
+```
+dotnet tool install -g MessageQueueNET.Cmd
+mqnet http://my-queue-server -c shell
+```
+
+In the examples below, `mqnet` can be used instead of `MessageQueueNET.Cmd.exe`.
 
 ## MessageQueueNET.Cmd.exe
 

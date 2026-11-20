@@ -1,4 +1,4 @@
-# MessageQueueNET v3.x
+# MessageQueueNET v4.x
 
 A message queue API fully implemented in .NET Core
 
@@ -12,6 +12,15 @@ _MessageQueueNET_ provides the following tools for this protocol:
 -   Client library: A .NET Standard Library to interact with the API
 -   Command line tools: Access to the _Message Queue_ via the command line
 
+## Get it
+
+-   ZIP packages (`win-x64`, `linux-x64`): [GitHub releases](https://github.com/jugstalt/MessageQueueNET/releases)
+-   Docker images: `ghcr.io/jugstalt/messagequeue-net`, `ghcr.io/jugstalt/messagequeue-net-dashboard` ([docker-compose.yml](./deploy/docker/docker-compose.yml))
+-   NuGet packages: `MessageQueueNET.Client`, `MessageQueueNET.Core`, `MessageQueueNET.Worker`, `MessageQueueNET.Aspire.Hosting`
+-   .NET tool: `dotnet tool install -g MessageQueueNET.Cmd` (command `mqnet`)
+
+## Documentation
+
 [Web API](./doc/api/api_en.md)
 
 [Client Library](./doc/client/client_en.md)
@@ -21,3 +30,7 @@ _MessageQueueNET_ provides the following tools for this protocol:
 [Queue Worker Pattern](./doc/queue-worker/queue-worker_en.md)
 
 [App Topic Pattern](./doc/app-topic/app_topic_pattern_en.md)
+
+[Build & Release](./doc/release_en.md)
+
+[Changelog](./CHANGELOG.md)

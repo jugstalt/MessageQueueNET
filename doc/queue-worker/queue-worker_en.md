@@ -130,7 +130,7 @@ internal class PingWorker : INonGenericQueueProcessor
 }
 ```
 
-To test you can use the `MessageQueueNET.Cmd.exe` console application:
+To test you can use the `MessageQueueNET.Cmd.exe` console application (or the .NET tool `mqnet`):
 
 ```
 .\MessageQueueNET.Cmd.exe https://localhost:5001 -c shell
