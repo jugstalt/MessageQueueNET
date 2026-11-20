@@ -92,7 +92,7 @@ static public class MessageQueueResourceBuilderExtensions
 
 internal static class MessageQueueContainerImageTags
 {
-    internal const string Registry = "docker.io";
-    internal const string Image = "gstalt/messagequeue_net";
+    internal const string Registry = "ghcr.io";
+    internal const string Image = "jugstalt/messagequeue-net";
     internal const string Tag = "latest";
 }
