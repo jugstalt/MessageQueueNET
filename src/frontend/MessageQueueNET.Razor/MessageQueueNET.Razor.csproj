@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -16,10 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.15" />
-    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.15" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
-    <PackageReference Include="MudBlazor" Version="9.14.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="MudBlazor" />
   </ItemGroup>
 
   <ItemGroup>

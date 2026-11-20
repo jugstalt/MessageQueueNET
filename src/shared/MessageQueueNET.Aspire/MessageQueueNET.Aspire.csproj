@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -6,21 +6,8 @@
 	  <LangVersion>12</LangVersion>
   </PropertyGroup>
 
-  <PropertyGroup>
-	  <AssemblyName>MessageQueueNET.Aspire</AssemblyName>
-	  <Version>3.24.4201-preview.1</Version>
-	  <Copyright>2024, Jürgen Gstaltmaier</Copyright>
-	  <PackageProjectUrl>https://github.com/jugstalt/MessageQueueNET</PackageProjectUrl>
-	  <RepositoryUrl>https://github.com/jugstalt/MessageQueueNET</RepositoryUrl>
-	  <Authors>Jürgen Gstaltmaier</Authors>
-	  <Company />
-	  <Product />
-	  <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-	  <PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-  </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" Version="17.0.0" />
+    <PackageReference Include="Aspire.Hosting" />
   </ItemGroup>
 
 </Project>

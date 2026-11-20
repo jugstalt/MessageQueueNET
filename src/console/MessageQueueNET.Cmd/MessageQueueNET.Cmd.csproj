@@ -7,6 +7,14 @@
 	<LangVersion>12</LangVersion>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>mqnet</ToolCommandName>
+    <PackageId>MessageQueueNET.Cmd</PackageId>
+    <Description>Command line tool for the MessageQueueNET REST API.</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\shared\MessageQueueNET.Client\MessageQueueNET.Client.csproj" />
     <ProjectReference Include="..\..\shared\MessageQueueNET.Worker\MessageQueueNET.Worker.csproj" />
