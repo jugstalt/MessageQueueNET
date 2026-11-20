@@ -13,20 +13,35 @@ inside the *_config/message-queue.json* file because it will not be overwritten 
 
 ```
 {
-  "Persist": {
-    "Type": "filesystem",
-    "RootPath": "C:\\temp\\message-queue\\persist"
+  "MessageQueue": {
+    "Persist": {
+      "Type": "filesystem",
+      "RootPath": "C:\\temp\\message-queue\\persist"
+    },
+    "Limits": {
+      "MaxQueues": 10000,
+      "MaxMessageBytes": 1048576,
+      "MaxDequeueCount": 1000,
+      "MaxQueueLength": 0
+    }
   },
   "Authorization": {
     "Type": "Basic",
     "Clients": [
       {
-        "Id": "client1",
-        "Secret": "pas3w0rd1"
+        "Id": "admin-client",
+        "Secret": "sha256:<sha256 hex of the secret>",
+        "Roles": [ "admin" ]
       },
       {
-        "Id": "client2",
-        "Secret": "pas3w0rd2"
+        "Id": "worker",
+        "Secret": "pas3w0rd2",
+        "Roles": [ "write" ]
+      },
+      {
+        "Id": "dashboard",
+        "Secret": "pas3w0rd3",
+        "Roles": [ "read" ]
       }
     ]
   }
@@ -36,11 +51,47 @@ inside the *_config/message-queue.json* file because it will not be overwritten 
 The queues are managed by default `in memory`. This guarantees a high performance. If the application is terminated (reused/recycled), all queues are also deleted.
 An alternative is the *persistence* of message queues. Only `filesystem` can be specified as `Type` here at the moment. The entries are additionally stored in the path specified under 'RootPath'.
 If the application is terminated and restarted later, the application restores the last state. In the case of very long queues, the application's start-up process can be take a few more seconds.
+Persisted queues with names that are not valid anymore (see queue name rules below) are skipped on startup (a warning is logged, the files are not deleted).
 
-The access to the message queue is open to all accesses via the *REST API*. If you want to restrict access to clients, they can be listed under `Authorization`.
-Only `Basic` is currently offered as a type. All *Clients* have the same rights and full access to the queues.
+### Limits
 
-Access is via `Basic Authentication` and can be specified via the *HTTP Header* (`Authencation: Basic base64(id:secret)`) or url format (`https://clientId:clientSecret@my-server`). 
+`MessageQueue:Limits` protects the service against resource exhaustion. A value `<= 0` means *unlimited*.
+
+| Setting | Default | Description |
+|---|---|---|
+| `MaxQueues` | `10000` | Maximum number of queues. Creating further queues fails. |
+| `MaxMessageBytes` | `1048576` | Maximum size of a single message (UTF-8 bytes). |
+| `MaxDequeueCount` | `1000` | Upper bound for the `count` parameter of `dequeue`. |
+| `MaxQueueLength` | `0` | Maximum number of messages in a single queue. |
+
+### Authorization
+
+Without an `Authorization` section, the message queue is open to all accesses via the *REST API* (a warning is logged at startup).
+For production use, configure `Basic` authentication (currently the only supported type) and list the clients under `Authorization:Clients`.
+
+Access is via `Basic Authentication` and can be specified via the *HTTP Header* (`Authorization: Basic base64(id:secret)`) or url format (`https://clientId:clientSecret@my-server`).
+Basic authentication transfers the credentials in plain text: use HTTPS (directly or via a TLS terminating reverse proxy).
+
+When authentication is enabled, every request requires valid credentials, including `/info` and the Swagger UI. Only the health check endpoints (`/health`, `/alive`) are anonymous.
+
+**Secrets** can be configured in plain text or as SHA-256 hash: `"Secret": "sha256:<64 hex characters>"`. The hash can be created e.g. with
+`printf '%s' 'my-secret' | sha256sum` (Linux) or
+`[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('my-secret')))` (PowerShell).
+
+**Roles** are hierarchical (`admin` includes `write`, `write` includes `read`). A client without `Roles` gets the `admin` role (backward compatibility).
+
+| Role | Allowed methods |
+|---|---|
+| `read` | `info`, `all`, `length`, `properties`, `queuenames` |
+| `write` | `read` + `enqueue`, `dequeue`, `confirmdequeue`, `register`/`remove` for a single queue (no pattern) |
+| `admin` | `write` + `register`/`remove` with patterns, `deletemessage` |
+
+Missing or invalid credentials return `401`, insufficient roles return `403`.
+
+### Errors
+
+Methods return `success: false` and an `errorMessage` on errors. Only expected errors (e.g. invalid queue name, limit exceeded, queue suspended) return a descriptive message.
+Unexpected errors return `Internal server error`; the details are written to the log.
 
 ## REST Interface (Info)
 
@@ -79,8 +130,13 @@ The following functions are provided by the API. The unique name `{id}` of a que
 
 The **MessageQueue.NET** API provides functionality to interact with message queues. 
 In this context, an `id` is a unique identifier used to specify a queue. 
-It can only consist of lowercase letters, digits, underscores (`_`), hyphens (`-`), and periods (`.`). 
-For example, valid `id` values could be `queue1`, `test.queue`, or `my_queue-123`. 
+It can only consist of lowercase letters, digits, underscores (`_`), hyphens (`-`), and periods (`.`), with the following rules:
+
+- it must start with a lowercase letter or digit
+- a period must be followed by a letter, digit, `_` or `-` (no `..`, no trailing period)
+- maximum length: 128 characters
+
+For example, valid `id` values could be `queue1`, `test.queue`, `appname.main.in` or `my_queue-123`. Invalid are e.g. `.`, `..`, `a..b`, `queue.` or `_queue`.
 
 The API also allows users to query multiple queues at once using an `idPattern`. This pattern can be a comma-separated list of queue identifiers, a wildcard expression, or a combination of both. For instance, `queue1,queue2` would target both `queue1` and `queue2`, while `test.*` would target all queues whose `id` starts with `test.`. A combined pattern like `queue1,test.*` would target `queue1` and all queues starting with `test.`.
 
@@ -93,10 +149,10 @@ The queue is therefore still empty, however, other processes can use '/queue/que
 
 When values are queried using this method, they automatically disappear from the queue and are no longer available for other processes.
 
-- **Method**: `GET`
+- **Method**: `POST`
 - **Parameters**:
   - `idPattern`: String (path, required) - Pattern to match queue IDs.
-  - `count`: Integer (query, optional, default=1) - Number of messages to dequeue.
+  - `count`: Integer (query, optional, default=1) - Number of messages to dequeue (limited by `MaxDequeueCount`).
   - `register`: Boolean (query, optional, default=false) - Indicates whether to register the queue if it doesn't exist.
 
 #### Example
@@ -104,7 +160,7 @@ When values are queried using this method, they automatically disappear from the
 **Request**
 
 ```http
-GET /Queue/dequeue/test.*
+POST /Queue/dequeue/test.*
 ```
 
 **Response**
@@ -131,7 +187,7 @@ time span. Otherwise, the message is automatically added back to the queue.
 This method confirms that the message has arrived and been successfully processed. With this method, the
 message finally removed from the queue.
 
-- **Method**: `GET`
+- **Method**: `POST`
 - **Parameters**:
   - `id`: String (path, required) - ID of the queue.
   - `messageId`: UUID (query, required) - ID of the message to confirm.
@@ -141,7 +197,7 @@ message finally removed from the queue.
 **Request**
 
 ```http
-GET /Queue/confirmdequeue/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
+POST /Queue/confirmdequeue/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
 ```
 
 **Response**
@@ -250,7 +306,7 @@ GET /Queue/length/test.*
 ### /Queue/remove/{idPattern}
 
 - **Description**: Removes the specified queue(s) or messages within them.
-- **Method**: `GET`
+- **Method**: `DELETE`
 - **Parameters**:
   - `idPattern`: String (path, required) - Pattern to match queue IDs.
   - `removeType`: Integer (query, required) - Type of removal (0: Remove Queue, 1: Remove All Items, 2: Remove Unconfirmed Items).
@@ -260,7 +316,7 @@ GET /Queue/length/test.*
 **Request**
 
 ```http
-GET /Queue/remove/test.*?removeType=0
+DELETE /Queue/remove/test.*?removeType=0
 ```
 
 **Response**
@@ -275,7 +331,7 @@ GET /Queue/remove/test.*?removeType=0
 
 Delete a single message from an queue
 
-- **Method**: `GET`
+- **Method**: `DELETE`
 - **Parameters**:
   - `id`: String (path, required) - ID of the queue.
   - `messageId`: UUID (query, required) - ID of the message to confirm.
@@ -285,7 +341,7 @@ Delete a single message from an queue
 **Request**
 
 ```http
-GET /Queue/deletemessage/test?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
+DELETE /Queue/deletemessage/test?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
 ```
 
 **Response**
@@ -326,7 +382,7 @@ If you set this werr to ``true``, no more values can be added to this queue unti
 - **suspendDequeue <bool>**: 
 If you set this value to ``true``, no messages can be retrieved from this queue. The messages are not deleted. If you set the value back to ``false``, the queue can be processed again.
 
-- **Method**: `GET`
+- **Method**: `PUT`
 - **Parameters**:
   - `idPattern`: String (path, required) - Pattern to match queue IDs.
   - `lifetimeSeconds`, `itemLifetimeSeconds`, `confirmationPeriodSeconds`, `maxUnconfirmedItems`: Integer (query, optional) - Queue properties.
@@ -337,7 +393,7 @@ If you set this value to ``true``, no messages can be retrieved from this queue.
 **Request**
 
 ```http
-GET /Queue/register/test.*?lifetimeSeconds=3600
+PUT /Queue/register/test.*?lifetimeSeconds=3600
 ```
 
 **Response**

@@ -4,6 +4,12 @@
     "Persist": {
       "Type": "filesystem",
       "RootPath": "{data-root-path}/data/persist"
+    },
+    "Limits": {
+      "MaxQueues": 10000,
+      "MaxMessageBytes": 1048576,
+      "MaxDequeueCount": 1000,
+      "MaxQueueLength": 0
     }
   },
   "Authorization_": {
@@ -11,11 +17,13 @@
     "Clients": [
       {
         "Id": "client1",
-        "Secret": "pas3w0rd1"
+        "Secret": "pas3w0rd1",
+        "Roles": [ "admin" ]
       },
       {
         "Id": "client2",
-        "Secret": "pas3w0rd2"
+        "Secret": "pas3w0rd2",
+        "Roles": [ "write" ]
       }
     ]
   }
