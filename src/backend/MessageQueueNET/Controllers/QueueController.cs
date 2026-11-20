@@ -36,6 +36,10 @@ namespace MessageQueueNET.Controllers
             _logger = logger;
         }
 
+        // null if authentication is disabled
+        private string? AuthenticatedUser
+            => User?.Identity?.IsAuthenticated == true ? User.Identity.Name : null;
+
         [HttpPost]
         [Route("dequeue/{idPattern}")]
         [RequiredRole(ClientRole.Write)]
@@ -94,7 +98,7 @@ namespace MessageQueueNET.Controllers
 
                             if (queue.Properties.ConfirmationPeriodSeconds > 0)
                             {
-                                unconfirmedItem = item.CloneForUnconfirmed(clientId);
+                                unconfirmedItem = item.CloneForUnconfirmed(clientId, AuthenticatedUser);
                                 persisted = await _persist.PersistUnconfirmedQueueItem(queue.Name, unconfirmedItem);
 
                                 if (persisted)
@@ -172,6 +176,11 @@ namespace MessageQueueNET.Controllers
 
                 if (queue.Properties.ConfirmationPeriodSeconds > 0)
                 {
+                    if (!_queues.IsConfirmingUserAllowed(queue, messageId, AuthenticatedUser))
+                    {
+                        throw new MessageQueueException("Message was dequeued by another user");
+                    }
+
                     if (await _persist.RemoveUnconfirmedQueueItem(queue.Name, messageId))
                     {
                         result.Success = _queues.ConfirmDequeuedMessage(queue, messageId);

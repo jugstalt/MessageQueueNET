@@ -74,6 +74,37 @@ public class QueueBehaviorTests
     }
 
     [Fact]
+    public async Task ConfirmDequeue_OnlyByDequeuingUser_WhenAuthenticated()
+    {
+        using var factory = new MessageQueueFactory(MessageQueueFactory.BasicAuth(
+            ("worker1", "s1", "write"), ("worker2", "s2", "write")));
+        var worker1 = factory.CreateClient("worker1", "s1");
+        var worker2 = factory.CreateClient("worker2", "s2");
+
+        Assert.True(Success(await ReadJson(await worker1.PutAsync("/queue/register/q?confirmationPeriodSeconds=60", null))));
+        await worker1.PutAsJsonAsync("/queue/enqueue/q", new[] { "hello" });
+
+        var message = (await ReadJson(await worker1.PostAsync("/queue/dequeue/q", null))).GetProperty("messages")[0];
+        var url = $"/queue/confirmdequeue/q?messageId={message.GetProperty("id").GetString()}";
+
+        Assert.False(Success(await ReadJson(await worker2.PostAsync(url, null))));
+        Assert.True(Success(await ReadJson(await worker1.PostAsync(url, null))));
+    }
+
+    [Fact]
+    public async Task ConfirmDequeue_Roundtrip_WithoutAuth_StillWorks()
+    {
+        using var factory = new MessageQueueFactory();
+        var client = factory.CreateClient();
+
+        await client.PutAsync("/queue/register/q?confirmationPeriodSeconds=60", null);
+        await client.PutAsJsonAsync("/queue/enqueue/q", new[] { "hello" });
+        var message = (await ReadJson(await client.PostAsync("/queue/dequeue/q", null))).GetProperty("messages")[0];
+
+        Assert.True(Success(await ReadJson(await client.PostAsync($"/queue/confirmdequeue/q?messageId={message.GetProperty("id").GetString()}", null))));
+    }
+
+    [Fact]
     public async Task ConfirmDequeue_DoesNotCreateQueue()
     {
         using var factory = new MessageQueueFactory();

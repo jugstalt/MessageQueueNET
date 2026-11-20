@@ -208,6 +208,7 @@ public class QueuesService
                     {
                         item.DequeuedUTC = null;
                         item.DequeuingClientId = "";
+                        item.DequeuingUser = "";
 
                         if (await persist.RemoveUnconfirmedQueueItem(queue.Name, item.Id) &&
                             await persist.PersistQueueItem(queue.Name, item))
@@ -232,6 +233,15 @@ public class QueuesService
             return false;
         }
     }
+
+    // Only the user that dequeued an item may confirm it. Without authentication (user is null/empty)
+    // or for items dequeued without a user, there is no identity to compare.
+    public bool IsConfirmingUserAllowed(Queue queue, Guid messageId, string? user)
+        => string.IsNullOrEmpty(user)
+           || !_unconfirmedItems.TryGetValue(queue.Name, out var unconfirmedItems)
+           || !unconfirmedItems.TryGetValue(messageId, out var item)
+           || string.IsNullOrEmpty(item.DequeuingUser)
+           || string.Equals(item.DequeuingUser, user, StringComparison.Ordinal);
 
     public bool ConfirmDequeuedMessage(Queue queue, Guid messageId)
     {

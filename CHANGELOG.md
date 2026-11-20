@@ -38,6 +38,7 @@ All notable changes to this project are documented in this file.
   - Polling no longer creates queues; a non-existent queue has hash code `0`.
   - Polling stops when the client disconnects.
   - Invalid `MaxRequestPollingSeconds` values no longer crash requests.
+- **Confirm bound to user**: with authentication enabled, only the user that dequeued a message can confirm it (`confirmdequeue`). Without authentication nothing changes.
 
 ### Breaking Changes
 

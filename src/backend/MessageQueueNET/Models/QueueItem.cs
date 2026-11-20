@@ -15,6 +15,8 @@ namespace MessageQueueNET.Models
         public DateTime? DequeuedUTC { get; set; }
         public string Message { get; set; } = "";
         public string DequeuingClientId { get; set; } = "";
+        // authenticated user that dequeued the item (empty if authentication is disabled)
+        public string DequeuingUser { get; set; } = "";
 
         private void ResetCreationDate()
         {
@@ -23,7 +25,7 @@ namespace MessageQueueNET.Models
 
         // Keeps the original CreationDateUTC, so ItemLifetimeSeconds is not reset when an
         // unconfirmed item is re-enqueued.
-        public QueueItem CloneForUnconfirmed(string clientId)
+        public QueueItem CloneForUnconfirmed(string clientId, string? user = null)
         {
             return new QueueItem()
             {
@@ -31,7 +33,8 @@ namespace MessageQueueNET.Models
                 Message = this.Message,
                 CreationDateUTC = this.CreationDateUTC,
                 DequeuedUTC = DateTime.UtcNow,
-                DequeuingClientId = clientId
+                DequeuingClientId = clientId,
+                DequeuingUser = user ?? ""
             };
         }
 
