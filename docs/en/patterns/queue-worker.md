@@ -1,176 +1,126 @@
-# Queue Worker Pattern
+# Queue worker pattern
 
-## Introduction
-
-The Queue worker Pattern is designed to enhance the processing capabilities of applications by monitoring multiple queues within a message queue system. This pattern focuses on the efficient handling and processing of messages serialized in JSON format, facilitating robust and scalable application architectures.
+The queue worker pattern lets an application watch one or more queues and hand each message to a matching
+**worker**. Messages are JSON objects; the field `Worker` decides which worker processes the message. A worker can
+write its result to a *result queue*, where the next worker picks it up.
 
 ```mermaid
 sequenceDiagram
     participant App as Application
-    participant MQ as Message Queue Service
-    participant NQP as Non-Generic Queue Processor
-    participant GQP as Generic Queue Processor
+    participant MQ as MessageQueue.NET
+    participant W as Queue watcher
+    participant Wk as Worker
 
-    App->>+MQ: Publishes JSON message
-    Note over MQ: multiple queues
-    MQ->>+NQP: Sends message to Non-Generic Processor
-    NQP->>-NQP: Processes message
-    NQP->>MQ: Posts result to Result Queue
-    MQ->>+GQP: Sends message to Generic Processor
-    GQP->>-GQP: Processes message
-    GQP->>MQ: Posts result to Result Queue
-
-    Note over NQP,GQP: Processors handle messages based on 'Worker' field
-
+    App->>MQ: Enqueue JSON message (Worker = "my.worker")
+    MQ->>W: Deliver message (long polling)
+    W->>Wk: Process(message)
+    Wk-->>W: QueueProcessorResult
+    W->>MQ: Confirm message
+    W->>MQ: Enqueue result to ResultQueue (optional)
 ```
 
-## Core Concept
+## Messages
 
-At the heart of the Processor Pattern is the BaseQueueProcessorMessage class, which includes essential information such as `ProcessId`, `Worker`, and optional fields for `ResultQueue`, `Publisher`, and `Subject`. This class serves as the standard message format that is enqueued and processed by various workers.
+Every message is based on `BaseQueueProcessorMessage`:
 
 ```csharp
 public class BaseQueueProcessorMessage
 {
     public string ProcessId { get; set; } = "";
-    public string Worker { get; set; } = "";
-    public string? ResultQueue { get; set; }
+    public string Worker { get; set; } = "";       // (1)!
+    public string? ResultQueue { get; set; }      // (2)!
     public string? Publisher { get; set; }
     public string? Subject { get; set; }
 }
 ```
 
-## Processing Mechanism
+1. The `WorkerId` of the worker that processes the message.
+2. Optional: the result of the worker is written to this queue.
 
-Messages are consumed by specific workers defined by either `INonGenericQueueProcessor` or `IGenericQueueProcessor<T>` interfaces. Each worker is associated with a unique `WorkerId` and has a policy defined by ConfirmAlways indicating whether to always acknowledge message processing after finishing.
+`GenericQueueProcessorMessage<T>` adds a typed `Body`.
 
-**Non-Generic Processor:**
+## Workers
 
-```csharp
-public interface INonGenericQueueProcessor : IQueueProcessor
-{
-    Task<QueueProcessorResult> Process(BaseQueueProcessorMessage jobProcessMessage, CancellationToken cancellationToken);
-}
-```
-
-**Generic Processor:**:
-
-```csharp
-public interface IGenericQueueProcessor<T> : IQueueProcessor where T : new()
-{
-    Task<QueueProcessorResult> ProcessGeneric(GenericQueueProcessorMessage<T> message, CancellationToken cancellationToken);
-}
-
-```
-
-When a message is received, it is delegated to an appropriate processor based on the message’s `Worker` field. The processor executes the `Process()` or `ProcessGeneric()` method depending on its type. Once the processing is complete, the result is optionally published back to a _Result Message Queue_ if specified, facilitating further asynchronous communication or result handling.
-
-## Benefits of the Processor Pattern
-
--   Flexibility: Handles both generic and non-generic message processing, allowing for versatile application scenarios.
--   Scalability: Efficiently processes a large volume of messages by distributing tasks across multiple workers.
--   Resilience: Enhances fault tolerance through isolated processing and optional acknowledgments.
-
-This pattern is particularly useful in environments where high throughput and reliability are required, such as real-time data processing systems and large-scale enterprise applications. The following sections will guide you through setting up and integrating the Processor Pattern into your system, ensuring that you can leverage its full potential for advanced message handling and processing.
-
-## Implementation
-
-Add a queue watcher to your application
-
-```csharp
-builder.services
-    .AddMessageQueueClientService()
-    .AddQueueProcessorWatcher(
-    config =>
-    {
-        config.MessageQueueApiUrl = "https://localhost:5001";// url to the messagequeue service;
-        config.QueueNameFilter = "mq-processor.jobs";        // filter: this queues will be watched
-                                                             // single queue: "my-queue",
-                                                             // queue filter: "my-queues.*" or
-                                                             // serveral queue filters: "my-queues.*,our-queues.*"
-    });
-```
-
-if a message received, die watcher sends the message to a registered
-worker. Message must contain the `WorkerId`
+A worker implements `IQueueProcessor`:
 
 ```csharp
 public interface IQueueProcessor
 {
     string WorkerId { get; }
-
-    bool ConfirmAlways { get; }
+    bool ConfirmAlways { get; } // (1)!
 }
 ```
 
-The `PingWorker` is an automatically added for testing with `AddQueueProcessorWatcher`
+1. `true`: the message is confirmed after processing, even if the worker fails.
 
-```csharp
-namespace MessageQueueNET.Client.Services;
+There are two kinds of workers:
 
-internal class PingWorker : INonGenericQueueProcessor
-{
-    public const string WorkerIdentifier = "mq.ping";
+=== "Non-generic"
 
-    public string WorkerId => WorkerIdentifier;
-
-    public bool ConfirmAlways => true;
-
-    public Task<QueueProcessorResult> Process(
-        BaseQueueProcessorMessage jobProcessMessage,
-        CancellationToken cancellationToken)
+    ```csharp
+    public interface INonGenericQueueProcessor : IQueueProcessor
     {
-        if (jobProcessMessage?.ResultQueue is not null
-            && jobProcessMessage.ResultQueue.StartsWith("ping.response.") == false)
-        {
-            jobProcessMessage.ResultQueue = $"ping.response.{jobProcessMessage.ResultQueue}";
-        }
-
-        return Task.FromResult(new QueueProcessorResult());
+        Task<QueueProcessorResult> Process(
+            BaseQueueProcessorMessage jobProcessMessage,
+            CancellationToken cancellationToken);
     }
-}
+    ```
+
+=== "Generic"
+
+    ```csharp
+    public interface IGenericQueueProcessor<T> : IQueueProcessor where T : new()
+    {
+        Task<QueueProcessorResult> ProcessGeneric(
+            GenericQueueProcessorMessage<T> message,
+            CancellationToken cancellationToken);
+    }
+    ```
+
+## Setup
+
+Register the client service and the queue watcher:
+
+```csharp title="Program.cs"
+using MessageQueueNET.Client.Extensions.DependencyInjetion;
+
+builder.Services
+    .AddMessageQueueClientService()
+    .AddQueueProcessorWatcher(config =>
+    {
+        config.MessageQueueApiUrl = "https://localhost:5001";
+        config.QueueNameFilter = "mq-processor.jobs"; // (1)!
+    });
 ```
 
-To test you can use the `MessageQueueNET.Cmd.exe` console application (or the .NET tool `mqnet`):
+1. Single queue (`my-queue`), pattern (`my-queues.*`) or several patterns (`my-queues.*,our-queues.*`).
 
-```
-.\MessageQueueNET.Cmd.exe https://localhost:5001 -c shell
+Further options: `MessageQueueClientId`, `MessageQueueClientSecret`, `MaxPollingSeconds` and `TryRegisterQueues`.
 
+### Testing with the ping worker
+
+`AddQueueProcessorWatcher` adds the `PingWorker` (`mq.ping`). It writes its result to
+`ping.response.{ResultQueue}`. Test it with [mqnet](../tools.md#shell):
+
+```text
+mqnet https://localhost:5001 -c shell
 >> mq-processor.jobs enqueue -ping -m 1
 ```
 
 ```mermaid
----
-title: Message Queue Flow
----
 flowchart LR
-    cmd[CMD: Enqueue Message]
-    q1([QUEUE: mq-processor.jobs])
-    watcher[QUEUE WATCHER]
-    worker[PING WORKER]
-    q2([QUEUE: ping.response.mq-processor.jobs])
+    cmd[mqnet: enqueue -ping]
+    q1([mq-processor.jobs])
+    watcher[Queue watcher]
+    worker[PingWorker]
+    q2([ping.response.mq-processor.jobs])
 
-    cmd --> q1
-    q1 --> watcher
-    watcher --> worker
-    worker --> q2
+    cmd --> q1 --> watcher --> worker --> q2
 ```
 
-## Custom Workers
+## Custom workers
 
-```csharp
-namespace MessageQueueNET.Core.Services.Abstraction;
-
-public interface IGenericQueueProcessor<T> : IQueueProcessor
-    where T : new()
-{
-    Task<QueueProcessorResult> ProcessGeneric(
-            GenericQueueProcessorMessage<T> message,
-            CancellationToken cancellationToken
-        );
-}
-```
-
-T => an individual (Body) model that will be received to the Worker, eg:
+Define a body model and, if needed, a result model:
 
 ```csharp
 public class CommandLineWorkerMessage
@@ -187,41 +137,32 @@ public class CommandLineWorkerResultBody
 }
 ```
 
-```csharp
+Implement the worker:
+
+```csharp title="CommandLineWorker.cs"
 public class CommandLineWorker : IGenericQueueProcessor<CommandLineWorkerMessage>
 {
     public const string WorkerIdentifier = "mq.commandline";
-
-    public CommandLineWorker()
-    {
-        // Dependencies
-    }
 
     public string WorkerId => WorkerIdentifier;
 
     public bool ConfirmAlways => true;
 
-    async public Task<QueueProcessorResult> ProcessGeneric(
-            GenericQueueProcessorMessage<CommandLineWorkerMessage>
-            message, CancellationToken cancellationToken
-        )
+    public async Task<QueueProcessorResult> ProcessGeneric(
+            GenericQueueProcessorMessage<CommandLineWorkerMessage> message,
+            CancellationToken cancellationToken)
     {
-        ProcessContext? proccessContext = null;
-
         try
         {
-            // Business logic
+            // business logic ...
 
-            // Return a messages for next worker in the queue => eg. log results (CommandLineResultFileOutputWorker)
-            // Message will be written to queue CommandLineResultFileOutputWorker.WorkerIdentifier
-            return new GenericQueueProcessorResult<CommandLineWorkerResultBody>()
+            return new GenericQueueProcessorResult<CommandLineWorkerResultBody>() // (1)!
             {
                 Worker = "mq-commandline.result.file",
                 Body = new CommandLineWorkerResultBody()
                 {
-                    Output = ...
-                    ErrorOutput = ...,
-                    ExitCode = ...
+                    ExitCode = 0,
+                    Output = "..."
                 }
             };
         }
@@ -235,62 +176,51 @@ public class CommandLineWorker : IGenericQueueProcessor<CommandLineWorkerMessage
         }
     }
 }
-
 ```
 
-Add custom Worker to Dependency Injection:
+1. If the message has a `ResultQueue`, this result is enqueued there as a message for the worker
+   `mq-commandline.result.file`.
 
-```csharp
-builder.services..AddTransient<IQueueProcessor, CommandLineWorker>();
+Register the worker:
+
+```csharp title="Program.cs"
+builder.Services.AddTransient<IQueueProcessor, CommandLineWorker>();
 ```
 
-# Sending a Worker Message
+## Sending worker messages
 
-Use the Client:
+Serialize the message and enqueue it with the [client](../client.md):
 
-```csharp
-var message = new BaseQueueProcessorMessage()
-{
-    ProcessId = "any id",
-    Worker = "mq.ping",  // the WorkerId
-    ResultQueue = $"ping.response.{cmdArguments.QueueName}",  // optional => response is written to this queue, for the next worker
-    Subject = "ping", // optional
-    Publisher = Environment.UserName,  // optional
-};
+=== "Base message"
 
-if (!(await client.EnqueueAsync(new string[]
+    ```csharp
+    var message = new BaseQueueProcessorMessage()
     {
-        JsonSerializer.Serialize(message)
-    })).Success)
-{
-    throw new Exception($"Can't enqueue messages...");
-}
-```
+        ProcessId = Guid.NewGuid().ToString(),
+        Worker = "mq.ping",
+        ResultQueue = "mq-processor.jobs",  // optional
+        Subject = "ping",                   // optional
+        Publisher = Environment.UserName    // optional
+    };
 
-With an custom message body:
+    await client.EnqueueAsync([JsonSerializer.Serialize(message)]);
+    ```
 
-```csharp
-var message = new GenericQueueProcessorMessage<CommandLineWorkerMessage>()
-{
-    ProcessId = ... // any id,
-    Worker = CommandLineWorker.WorkerIdentifier,
-    ResultQueue = $"{cmdArguments.QueueName}.results",
-    Subject = ... // optional, eg the command name,
-    Publisher = Environment.UserName,
-    Body = new()
+=== "Generic message"
+
+    ```csharp
+    var message = new GenericQueueProcessorMessage<CommandLineWorkerMessage>()
     {
-        Command = cmdArguments.WorkerCommand,
-        Arguments = "...." // arguments for the command
-    }
-};
+        ProcessId = Guid.NewGuid().ToString(),
+        Worker = CommandLineWorker.WorkerIdentifier,
+        ResultQueue = "mq-processor.jobs.results",
+        Publisher = Environment.UserName,
+        Body = new()
+        {
+            Command = @"c:\temp\test.bat",
+            Arguments = "123"
+        }
+    };
 
-if (!(await client.EnqueueAsync(new string[]
-    {
-        JsonSerializer.Serialize(message)
-    })).Success)
-{
-    throw new Exception($"Can't enqueue messages...");
-}
-```
-
-[App Topic Pattern](../app-topic/app_topic_pattern_en.md)
+    await client.EnqueueAsync([JsonSerializer.Serialize(message)]);
+    ```

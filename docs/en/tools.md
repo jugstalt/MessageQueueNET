@@ -1,54 +1,44 @@
-# Commandline Tools
+# Command line tools
 
-The software package provides command line tools that allow access to the queues. The tools are part of the ZIP packages (folder `cmd`, single files, require the .NET 10 runtime).
+## mqnet
 
-`MessageQueueNET.Cmd` is also available as .NET tool (requires the .NET 10 runtime):
+`MessageQueueNET.Cmd` sends single commands to a queue or opens an interactive shell. It is part of the ZIP
+packages (folder `cmd`) and is available as .NET tool `mqnet`. Both require the .NET 10 runtime.
 
-```
+```bash
 dotnet tool install -g MessageQueueNET.Cmd
-mqnet http://my-queue-server -c shell
 ```
 
-In the examples below, `mqnet` can be used instead of `MessageQueueNET.Cmd.exe`.
+### Single commands
 
-## MessageQueueNET.Cmd.exe
-
-This tool can be used to pass individual commands to the queue (e.g. insert a new message)
-Use it as follows:
-
-```
-Usage: MessageQueueNET.Cmd.exe serviceUrl -q queueName -c comand {-m message | -f messages-file}
-       command: remove, enqueue, dequeue, length, queuenames, register, all
+```text
+mqnet serviceUrl -q queueName -c command {-m message | -f messages-file}
+      command: remove, enqueue, dequeue, length, queuenames, register, properties, all, shell
 ```
 
-`serviceUrl`, `queneName` and `command` are required. If you use the API authorization, it can be done using url-format (`https://clientId:clientSecret@my-server/...`).
+- `serviceUrl`, `-q` and `-c` are required. With [authorization](api/configuration.md#authorization), pass the
+  credentials in the URL: `https://clientId:clientSecret@my-server`.
+- `-m` adds a message; it can be used several times.
+- `-f` reads messages from a text file. Each line is one message, blank lines are ignored.
 
-If messages are added to a queue, this can be done with the `-m` option. If multiple messages are passed at the same time,
-you can pass a text file with the messages with the `-f` option. Each line in the text file corresponds to a message. Blank lines are ignored.
+The commands correspond to the [REST methods](api/rest.md).
 
-The above values can be specified as commands after the `-c` option. The meaning of each command was described in the REST API documentation.
-
-Example
-
-```
-./MessageQueueNET.Cmd.exe http://my-queue-server -q my-queue-1 -c enqueue -m "Message 1"
+```bash
+mqnet http://localhost:9091 -q my-queue-1 -c enqueue -m "Message 1"
 ```
 
-### MessageQueueNET.Cmd Shell
+### Shell
 
-The 'shell' command starts a simple shell. With the shell you can send commands to a MessageQueueNET instance.
+The command `shell` starts an interactive shell. Type `help` to list all commands and options.
 
+```bash
+mqnet http://localhost:9091 -c shell
 ```
-./MessageQueueNET.Cmd.exe http://my-queue-server -c shell
-```
 
-Example:
-
-```
+```text
 MessageQueueNET Shell
 Type help for help...
->>
->> queue1 register
+>> queue1 register -confirmationperiod 60
 >> queue1 properties
 LastAccessUTC: 10.01.2022 13:59:03
 Length: 0
@@ -56,53 +46,55 @@ LifetimeSeconds: 0
 ItemLifetimeSeconds: 0
 SuspendEnqueue: False
 SuspendDequeue: False
->>
 >> queuenames
 queue1
->>
 >> queue1 enqueue -m "message #1" -m "message #2"
->>
 >> queue1 all
 message #1
 message #2
->>
 >> exit
 ```
 
+| Command | Options |
+|---|---|
+| `register` | `-lifetime n`, `-itemlifetime n`, `-confirmationperiod n`, `-maxunconfirmeditems n`, `-suspend-enqueue true\|false`, `-suspend-dequeue true\|false` |
+| `properties` | |
+| `remove` | |
+| `length` | `-full`: include unconfirmed messages |
+| `all` | `-max n`, `-unconfirmed`, `-full`: show id and message |
+| `enqueue` | `-m message` (several times), `-f file`, `-ping`, `-workercmd command` |
+| `dequeue` | |
+| `confirm` | `-id messageId` |
 
 ## MessageQueueNET.Processor
 
-MessageQueueNET.Processor is a C# console application designed to monitor a message queue and execute the listed messages. It's a robust tool for managing and processing tasks queued in your system.
+`MessageQueueNET.Processor` is a console application that watches queues and executes command line jobs from
+the messages. It uses the [queue worker pattern](patterns/queue-worker.md) with the worker `mq.commandline`.
 
-### How It Works
-
-The application continuously monitors a specified message queue. When a new message appears, it executes the command associated with that message, adhering to predefined filters and constraints for security and efficiency.
-
-### Usage
-
-Run the application using the following command:
-
-```
-.\MessageQueueNET.Processor.exe --api <API_URL> --filter <QUEUE_NAME> --output <LOG_DIRECTORY> --command <ALLOWED_COMMANDS>
+```powershell
+.\MessageQueueNET.Processor.exe `
+    --api https://localhost:5001 `
+    --filter mq-processor.* `
+    --output c:\temp\mq-processor `
+    --command c:\temp\*.exe,c:\temp\*.cmd,c:\temp\*.bat
 ```
 
-Example:
-```
-.\MessageQueueNET.Processor.exe --api https://localhost:5001 --filter mq-processor.* --output c:\temp\mq-processor --command c:\temp\*.exe,c:\temp\*.cmd,c:\temp\*.bat
-```
+| Parameter | Description |
+|---|---|
+| `--api` | URL of the MessageQueue.NET API |
+| `--filter` | Queue name or [pattern](api/rest.md#patterns) to watch |
+| `--output` | Directory for the result logs |
+| `--command` | Comma-separated list of allowed commands (wildcards allowed) |
 
-### Parameters
+!!! danger "Security"
+    Only commands matching `--command` are executed. All other messages are rejected, so arbitrary processes
+    cannot be started through the queue. Keep this list as small as possible.
 
- * `--api` URL to the MessageQueue.
- * `--filter` Name of the queue to monitor. Wildcards can be used to monitor multiple queues.
- * `--output` Directory where logs for the results will be stored.
- * `--command` A comma-separated list of commands that are allowed to be executed. Wildcards can be used. This list must be specified to ensure that only specific, safe processes are started.
+The result of every job is written to the output directory.
 
-### Message Format in the Queue
+### Message format
 
-Messages in the queue must be structured in a specific format to be processed correctly. Here's an example of a valid message:
-
-``` javascript
+```json
 {
   "Body": {
     "Command": "c:\\temp\\test.bat",
@@ -116,54 +108,17 @@ Messages in the queue must be structured in a specific format to be processed co
 }
 ```
 
-Required Properties
+- `ProcessId`: unique identifier of the job.
+- `Worker`: always `mq.commandline`.
+- `Body.Command`, `Body.Arguments`: command and arguments. The command must match `--command`.
+- `ResultQueue`, `Publisher`, `Subject`: optional.
 
-* `ProcessId`: A unique identifier for the process.
-* `Worker`: Specifies the worker that will execute the message. This must always be set to "mq.commandline".
-* `Command`, Arguments: The command to be executed along with its parameters. The command must match one of the allowed commands specified in the --command parameter; otherwise, it will be rejected for security reasons.
+### Sending jobs with mqnet
 
-`Publisher` and `Subject` are optional Properties
+In the [shell](#shell), `-workercmd` creates messages in this format. Each `-m` value (or each line of `-f`) becomes
+the arguments of one job:
 
-### Security
-
-The application ensures that only specified commands can be run, preventing the execution of arbitrary or potentially harmful processes. This feature is critical for maintaining the security and integrity of your system.
-
-### Logs
-
-Logs for each processed message and the result of its execution are stored in the specified output directory. This ensures easy tracking and auditing of the tasks handled by the application.
-
-### Sending Messages to the Queue Using Command Line
-
-To send messages to the queue in the format required by MessageQueueNET.Processor, you can use the MessageQueueNET.Cmd command line tool. Follow these steps to enqueue messages:
-
-1. Run the Command Line Tool
-
-Execute the following command to start the MessageQueueNET.Cmd tool:
-
+```text
+>> mq-processor.jobs enqueue -workercmd c:\temp\test.bat -m "argument1 argument2"
+>> mq-processor.jobs enqueue -workercmd c:\temp\test.bat -f c:\temp\arguments.txt
 ```
-.\MessageQueueNET.Cmd.exe <url-to-messagequeue> -c shell
-```
-
-Replace <url-to-messagequeue> with the URL of your message queue.
-
-2. Enqueue a Message
-
-Once in the shell, use the following command to enqueue a message:
-
-```
-<name-of-the-queue> enqueue -workercmd c:\temp\test.bat -m "argument1 argument2..."
-```
-
-Replace <name-of-the-queue> with the name of your queue, and adjust the command and arguments as required.
-
-Optional: Enqueue Messages from a File
-
-Alternatively, instead of manually typing out each message, you can specify a text file containing the parameters/arguments for the command. Each line in the file should contain the arguments for one command. Use the following command to enqueue messages from a file:
-
-```
-<name-of-the-queue> enqueue -workercmd c:\temp\test.bat -f <path-to-your-text-file>
-```
-
-Replace <path-to-your-text-file> with the path to your text file.
-
-[Queue Worker Pattern](../queue-worker/queue-worker_en.md)

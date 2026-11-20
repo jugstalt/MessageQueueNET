@@ -1,89 +1,127 @@
-# MessageQueueNET.Client
+# Client library
 
-The `MessageQueueNET.Client` .NET Standard Library (nuget) contains the `QueueClient` class, which provides an abstraction of the REST interface using any .NET language.
+The NuGet package [`MessageQueueNET.Client`](https://www.nuget.org/packages/MessageQueueNET.Client/)
+(.NET Standard 2.1) wraps the REST API. It also contains the services for the
+[queue worker](patterns/queue-worker.md) and [app topic](patterns/app-topic.md) patterns.
 
-https://www.nuget.org/packages/MessageQueueNET.Client
-
-## Instantiation
-
-A client can be created as follows:
-
-```csharp
-var client = new QueueClient("https://clientId:clientSecret@my-server", "my-queue-1");
+```bash
+dotnet add package MessageQueueNET.Client
 ```
 
-If API authorization is used, the `ClientId` and `ClientSecret` can be passed in url-format (example above) or as optional parameters.
+!!! warning "Client and server version"
+    Use a client with the same major version as the server. Clients older than 4.0 cannot call the
+    4.x API because some HTTP methods changed.
 
-## Methods
+## QueueClient
 
-Here all methods are listed. The function is the same as described for the REST API:
+A `QueueClient` works on one queue name or [pattern](api/rest.md#patterns).
 
-```csharp
-Task<InfoResult> ApiInfoAsync()
-```
+=== "Credentials in the URL"
 
-```csharp
-Task<ApiResult> EnqueueAsync(IEnumerable<string> messages)
-```
+    ```csharp
+    using MessageQueueNET.Client;
+    using MessageQueueNET.Client.Models;
 
-```csharp
-Task<MessagesResult> DequeueAsync(
-            int count = 1,
-            bool register = false,
-            CancellationToken? cancelationToken = null,
-            int? hashCode = null)
-```
+    var client = new QueueClient(
+        new MessageQueueConnection("https://worker:secret@mq.example.com"),
+        "orders");
+    ```
 
-```csharp
-Task<ApiResult> ConfirmDequeueAsync(Guid messageId)
-```
+=== "BasicAuthentication"
 
-```csharp
-Task<MessagesResult> AllMessagesAsync(int max = 0, bool unconfirmedOnly = false)
-```
+    ```csharp
+    using MessageQueueNET.Client;
+    using MessageQueueNET.Client.Models;
+    using MessageQueueNET.Client.Models.Authentication;
 
-```csharp
-Task<QueueLengthResult> LengthAsync()
-```
+    var client = new QueueClient(
+        new MessageQueueConnection("https://mq.example.com")
+        {
+            Authentication = new BasicAuthentication("worker", "secret")
+        },
+        "orders");
+    ```
 
-```csharp
-Task<ApiResult> RemoveAsync(RemoveType removeType = RemoveType.Queue)
-```
+The constructor optionally takes an `HttpClient`. Without it, a shared static `HttpClient` is used.
 
-```csharp
-Task<ApiResult> DeleteMessage(Guid messageId)
-```
+### Example
 
 ```csharp
-Task<QueuePropertiesResult> RegisterAsync(int? lifetimeSeconds = null,
-                                          int? itemLifetimeSeconds = null,
-                                          int? confirmationPeriodSeconds = null,
-                                          int? maxUnconfirmedItems = null,
-                                          MaxUnconfirmedItemsStrategy? maxUnconfirmedItemsStrategy = null,
-                                          bool? suspendEnqueue = null,
-                                          bool? suspendDequeue = null)
+var client = new QueueClient(new MessageQueueConnection("http://localhost:9091"), "orders");
+
+await client.RegisterAsync(confirmationPeriodSeconds: 60); // (1)!
+
+await client.EnqueueAsync(["order #1", "order #2"]);
+
+var length = await client.LengthAsync();               // length.Queues["orders"].QueueLength == 2
+
+var result = await client.DequeueAsync(count: 1);
+foreach (var message in result.Messages ?? [])
+{
+    Console.WriteLine(message.Value);                  // "order #1"
+    await client.ConfirmDequeueAsync(message.Id);      // (2)!
+}
 ```
 
-```csharp
-Task<QueuePropertiesResult> PropertiesAsync(CancellationToken? cancelationToken = null,
-                                            int? hashCode = null)
+1. Dequeued messages must be confirmed within 60 seconds, otherwise they go back into the queue.
+2. Confirm only after the message was processed successfully.
+
+### Methods
+
+All methods return a result derived from `ApiResult` (`Success`, `ErrorMessage`, `HashCode`) and accept an
+optional `CancellationToken`. They behave like the [REST methods](api/rest.md).
+
+| Method | REST |
+|---|---|
+| `ApiInfoAsync()` | [`GET /Info`](api/rest.md#info) |
+| `EnqueueAsync(messages)` | [`PUT /Queue/enqueue`](api/rest.md#enqueue) |
+| `DequeueAsync(count, register, cancelationToken, hashCode, maxPollingSeconds)` | [`POST /Queue/dequeue`](api/rest.md#dequeue) |
+| `ConfirmDequeueAsync(messageId)` | [`POST /Queue/confirmdequeue`](api/rest.md#confirm-dequeue) |
+| `AllMessagesAsync(max, unconfirmedOnly)` | [`GET /Queue/all`](api/rest.md#all-messages) |
+| `LengthAsync()` | [`GET /Queue/length`](api/rest.md#length) |
+| `RegisterAsync(lifetimeSeconds, itemLifetimeSeconds, confirmationPeriodSeconds, maxUnconfirmedItems, maxUnconfirmedItemsStrategy, suspendEnqueue, suspendDequeue)` | [`PUT /Queue/register`](api/rest.md#register) |
+| `PropertiesAsync(cancelationToken, hashCode, maxPollingSeconds, silentAccess)` | [`GET /Queue/properties`](api/rest.md#properties) |
+| `QueueNamesAsync()` | [`GET /Queue/queuenames`](api/rest.md#queue-names-list) |
+| `RemoveAsync(removeType)` | [`DELETE /Queue/remove`](api/rest.md#remove) |
+| `DeleteMessage(messageId)` | [`DELETE /Queue/deletemessage`](api/rest.md#delete-message) |
+
+Non-success HTTP responses throw a `MessageQueueClientException` with the `StatusCode`.
+
+## Dependency injection and long polling
+
+In ASP.NET Core and worker services, register the `MessageQueueClientService`. It uses `IHttpClientFactory`,
+checks that client and server major versions match and provides **long polling** streams:
+
+```csharp title="Program.cs"
+using MessageQueueNET.Client.Extensions.DependencyInjetion;
+
+builder.Services.AddMessageQueueClientService();
 ```
 
-```csharp
-Task<QueueNamesResult> QueueNamesAsync()
+```csharp title="OrderConsumer.cs"
+using MessageQueueNET.Client.Models;
+using MessageQueueNET.Client.Services;
+
+public class OrderConsumer(MessageQueueClientService mq) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var connection = new MessageQueueConnection("https://worker:secret@mq.example.com");
+
+        await foreach (var result in mq.GetNextMessages(connection, "orders", stoppingToken)) // (1)!
+        {
+            foreach (var message in result.Messages ?? [])
+            {
+                // process message.Value
+            }
+        }
+    }
+}
 ```
 
-Example:
+1. Each iteration waits on the server until new messages arrive (long polling), instead of polling in a loop.
 
-```csharp
-var client = new QueueClient("https://clientId:clientSecret@my-server", "my-queue-1");
+`GetNextQueueProperties(...)` works the same way for queue properties (used by the dashboard).
 
-await client.Enqueue(new [] { "Message1", "Messsage2" });
-
-var queueNames = await client.QueueNames(); // => ["my-queue-1, ..."]
-
-var length = await client.Length(); // => 2
-var message = await client.Dequeue(); // => ["Message1"]
-```
-
-[Commandline Tools](../console/tools_en.md)
+For complete consumers with workers, results and confirmations, use the
+[queue worker pattern](patterns/queue-worker.md).

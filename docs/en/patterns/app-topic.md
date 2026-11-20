@@ -1,143 +1,115 @@
-# Application Topic Pattern
+# App topic pattern
 
-## Introduction
-
-In modern distributed systems, maintaining consistent state across various instances of an application is a critical challenge. The AppTopic Pattern addresses this issue by leveraging a message queue API to ensure reliable and consistent communication and state synchronization within a Kubernetes cluster.
-
-This pattern is designed to integrate seamlessly into any application requiring high availability and consistency across multiple instances running in a cloud-native environment. It uses a publish-subscribe model, where different services within the application can publish or subscribe to specific topics. These topics facilitate the propagation of state changes or important events across all instances of the application, ensuring that each part of the system remains up-to-date with the latest data.
+When an application runs in several instances (e.g. in Kubernetes), some actions must reach **all** instances,
+for example clearing an in-memory cache. With the app topic pattern, every instance gets its own queue, and a
+message is enqueued into the queues of all instances.
 
 ```mermaid
 sequenceDiagram
-    participant I1 as Instanz 1
-    participant MQ as MessageQueue
-    participant I2 as Instanz 2
-    participant I3 as Instanz 3
-    participant I4 as Instanz 4
+    participant I1 as Instance 1
+    participant MQ as MessageQueue.NET
+    participant I2 as Instance 2
+    participant I3 as Instance 3
 
-    I1->>+MQ: Send Command
-    Note over MQ: receive
-    MQ->>+I2: deliver command
-    MQ->>+I3: deliver command
-    MQ->>+I4: deliver command
-    I2->>-I2: execute command
-    I3->>-I3: execute command
-    I4->>-I4: execute command
+    I1->>MQ: EnqueueAsync<ClearCacheHandler>(...)
+    MQ->>I2: deliver message
+    MQ->>I3: deliver message
+    I2->>I2: handler.InvokeAsync(...)
+    I3->>I3: handler.InvokeAsync(...)
 ```
 
-## Implementation
+## Setup
 
-To implement this feature, look at the following example:
-
-```json
-// appsettings.config
+```json title="appsettings.json"
 {
-    "MessageQueue": {
-        "ConnectionString": "http://localhost:9091",
-        "Namespace": "production"
-    }
+  "MessageQueue": {
+    "ConnectionString": "http://localhost:9091",
+    "Namespace": "production"
+  }
 }
 ```
 
-Register at least this MessageQueueNet Services:
+```csharp title="Program.cs"
+using MessageQueueNET.Client.Extensions.DependencyInjetion;
 
-```csharp
-builder.services
+builder.Services
     .AddMessageQueueClientService()
     .AddMessageQueueAppTopicServices(config =>
     {
-        config.MessageQueueApiUrl = configuration["MessageQueue:ConnectionString"] ?? "";
-        // optional
-        config.MessageQueueClientId = configuration["MessageQueue:ClientId"] ?? "";
-        config.MessageQueueClientSecret = configuration["MessageQueue:ClientSecret"] ?? "";
-        config.MaxPollingSeconds = 20;  // Maximal polling time, for query new items.
-                                        // After this time, the Requests end and
-                                        // a new request will be opend
+        config.MessageQueueApiUrl = builder.Configuration["MessageQueue:ConnectionString"] ?? "";
+        config.MessageQueueClientId = builder.Configuration["MessageQueue:ClientId"] ?? "";         // (1)!
+        config.MessageQueueClientSecret = builder.Configuration["MessageQueue:ClientSecret"] ?? "";
+        config.MaxPollingSeconds = 20; // (2)!
 
         config.AppName = "my-app-name";
-        // optional: but use it, to show, wich instances should be syncronized.
-        // it is important, if developement, test, staging, production instances use the
-        // same massagequeue to syncronize
-        config.Namespace = configuration["MessageQueue:Namespace"] ?? "";
+        config.Namespace = builder.Configuration["MessageQueue:Namespace"] ?? ""; // (3)!
 
         config.QueueLifetimeSeconds = 120;     // optional
         config.ItemLifetimeSeconds = 120;      // optional
-        config.ManageQueueLiftimeCycle = true;  // true ... default
+        config.ManageQueueLifetimeCycle = true; // default
     })
-    .AddMessageHandler<ClearInMemoryCacheMessageQueueHandler>()
-    .AddMessageHandler<...MessageQueueHandler>()
-    .AddMessageHandler<...MessageQueueHandler>();
+    .AddMessageHandler<ClearInMemoryCacheMessageHandler>();
 ```
 
-this will create a queue on startup with the following name:
+1. Optional, only if [authorization](../api/configuration.md#authorization) is enabled.
+2. Maximum time a long polling request waits for new messages before a new request is started.
+3. Optional, but recommended if development, test and production instances share one MessageQueue.NET server.
 
+On startup, every instance creates its own queue:
+
+```text
+production.my-app-name3f2a9c1e0b7d4e6f8a5b2c4d6e8f0a1b   // {Namespace}.{AppName}{instance id}
 ```
-production.my-app-nameBD98A4C2-5F38-4FF8-9C5C-4318D7A9AE3E   // {Namespace}.{AppName}{auto-genereted-guid}
-```
 
-If you run several instances of your app, every instance gets a individual queue, only differs by the GUID
+The instances only differ in the instance id.
 
-Create a class that implements `IMessageHandler` to handle actions for an app instance.
-This must be registred with `builder.services.AddMessageHandler()` (see above).
+## Message handlers
 
-```csharp
-[MessageHandler(CommandName = CommandName)]  // optional. if not set, the command Name will be the name of the class. Use olny letters and numbers here
-internal class ClearInMemoryCacheMessageQueueHandler : IMessageHandler
+A message handler implements `IMessageHandler` and is registered with `AddMessageHandler<T>()`:
+
+```csharp title="ClearInMemoryCacheMessageHandler.cs"
+[MessageHandler(CommandName = CommandName)] // (1)!
+internal class ClearInMemoryCacheMessageHandler(
+        IMyCache myCache,
+        ILogger<ClearInMemoryCacheMessageHandler> logger) : IMessageHandler
 {
     public const string CommandName = "ClearInMemCache";
 
-    private readonly IMyCache _myCache;
-    private readonly ILogger<ClearInMemoryCacheMessageQueueHandler> _logger;
-
-    public MessageQueueNetMessageHandler(
-                IMyCache myCache,
-                ILogger<ClearInMemoryCacheMessageQueueHandler> logger)
-    {
-        _myCache = myCache;
-        _logger = logger;
-    }
-
-    async public Task InvokeAsync(string message)
+    public Task InvokeAsync(string message)
     {
         try
         {
-            _myCache.Clear();
+            myCache.Clear();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Exception: {exceptionMessage}", ex.Message);
+            logger.LogWarning("Exception: {exceptionMessage}", ex.Message);
         }
+
+        return Task.CompletedTask;
     }
 }
 ```
 
-A `BackgroundWorker` (registered above with `builder.services.AddMessageQueueAppTopicServices()`) waits for new messages, that must fit the following pattern:
+1. Optional. Without the attribute, the command name is the class name. Use only letters and digits.
 
-```
-{command/handler-name}:{message}
-```
+A background service waits for messages in the format `{command}:{message}` and calls `InvokeAsync(message)` of
+the matching handler.
 
-If a suitable `IMessageHandler` is registered its `InvoceAsync(string message)` method will be called.
+## Sending messages
 
-To send a message to all instances of your application use the `MessageQueueAppTopicService`.
-(This shoud be registered above with `builder.services.AddMessageQueueAppTopicServices(...)`).
+Use the `MessageQueueAppTopicService` to send a message to all instances:
 
 ```csharp
-class MyServiceOrController(MessageQueueAppTopicService topicService)
+class MyService(MessageQueueAppTopicService topicService)
 {
-    public void ClearAllCaches()
-    {
-        bool includeOwnQueue = true; // send the messages also to the queue of the current instance
-
-        topicService.EnqueueAsync<ClearInMemoryCacheMessageQueueHandler>(
-                    ["Hi there, please clear cache ;)"],
-                    includeOwnQueue
-                );
-    }
+    public Task ClearAllCaches()
+        => topicService.EnqueueAsync<ClearInMemoryCacheMessageHandler>(
+                ["please clear the cache"],
+                includeOwnQueue: true); // (1)!
 }
 ```
 
-This sends a message to all queues fitting the following pattern:
+1. `true`: the current instance receives the message, too.
 
-```
-production.my-app-name*   // {Namespace}.{AppName}*
-```
+The message is enqueued into all queues matching `{Namespace}.{AppName}*`, e.g. `production.my-app-name*`.

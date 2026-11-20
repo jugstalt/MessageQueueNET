@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 # Nuke
 .nuke/temp/
+
+# MkDocs virtual environment
+.venv-docs/

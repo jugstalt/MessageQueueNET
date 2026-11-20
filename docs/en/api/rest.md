@@ -1,453 +1,448 @@
-# REST API
+# REST reference
 
-The Rest API is a .NET Core API Web application. The application runs in both *Microsoft IIS*, *Standalone* (dotnet MessageQueueNET.dll), or as a *Docker Container*.
+All queue methods live under `/Queue`. Every response contains `success` and, on errors, `errorMessage`
+(see [Errors](configuration.md#errors)). Responses of queue methods also contain a `hashCode` that can be used
+for [long polling](configuration.md#long-polling).
 
-The API provides methods for creating and querying queues. Any queues can be created with a unique name (any string). Each of these queues is handled by different processes.
+| Method | Route | Role | Description |
+|---|---|---|---|
+| `GET` | [`/Info`](#info) | `read` | Version of the API |
+| `PUT` | [`/Queue/enqueue/{id}`](#enqueue) | `write` | Add messages to a queue |
+| `POST` | [`/Queue/dequeue/{idPattern}`](#dequeue) | `write` | Take messages from one or more queues |
+| `POST` | [`/Queue/confirmdequeue/{id}`](#confirm-dequeue) | `write` | Confirm a processed message |
+| `GET` | [`/Queue/all/{idPattern}`](#all-messages) | `read` | Read messages without removing them |
+| `GET` | [`/Queue/length/{idPattern}`](#length) | `read` | Number of messages |
+| `PUT` | [`/Queue/register/{idPattern}`](#register) | `write`/`admin` | Create a queue or change its properties |
+| `GET` | [`/Queue/properties/{idPattern}`](#properties) | `read` | Properties and state of queues |
+| `GET` | [`/Queue/queuenames`](#queue-names-list) | `read` | Names of all queues |
+| `DELETE` | [`/Queue/remove/{idPattern}`](#remove) | `write`/`admin` | Remove queues or their messages |
+| `DELETE` | [`/Queue/deletemessage/{id}`](#delete-message) | `admin` | Delete a single message |
 
-## Installation
+Methods with an `idPattern` need the `admin` role when the pattern matches more than one queue
+(`register`, `remove`). See [Roles](configuration.md#roles).
 
-### ZIP package
+## Queue names
 
-Every [GitHub release](https://github.com/jugstalt/MessageQueueNET/releases) contains ZIP packages for `win-x64` and `linux-x64` (requires the ASP.NET Core 10 runtime):
+A queue is identified by a unique name (`id`). Names may contain lowercase letters, digits, `_`, `-` and `.`:
 
-```
-<version>/
-  api/app/          # MessageQueueNET (REST API)
-  dashboard/app/    # MessageQueueNET.Blazor (dashboard)
-  cmd/              # MessageQueueNET.Cmd, MessageQueueNET.Processor
-  start-messagequeue(.bat|.sh)            # API on port 9091
-  start-messagequeue-dashboard(.bat|.sh)  # dashboard on port 9090
-```
+- a name starts with a lowercase letter or digit,
+- a period must be followed by a letter, digit, `_` or `-` (no `..`, no trailing period),
+- a name has at most 128 characters.
 
-### Docker
+Valid: `queue1`, `test.queue`, `appname.main.in`, `my_queue-123`.
+Invalid: `.`, `..`, `a..b`, `queue.`, `_queue`.
 
-```
-docker run -p 9091:8080 -v mq-data:/home/app/messagequeue \
-  -e MESSAGEQUEUE__PERSIST__TYPE=filesystem -e MESSAGEQUEUE__PERSIST__ROOTPATH=/home/app/messagequeue/persist \
-  ghcr.io/jugstalt/messagequeue-net
-docker run -p 9090:8080 ghcr.io/jugstalt/messagequeue-net-dashboard
-```
+### Patterns
 
-The images run as the non-root user `app` on port `8080`. Tags: `X.Y.Z`, `X.Y` and `latest` (preview versions only get their version tag).
-A complete example is [deploy/docker/docker-compose.yml](../../deploy/docker/docker-compose.yml).
+Methods with an `idPattern` work on several queues at once. A pattern is a comma-separated list of names and
+wildcard expressions:
 
-### OpenAPI / Scalar
-
-In the `Development` environment, or if `openApiUI` is `true` (environment variable `OPENAPIUI`), the API description is available at `/openapi/v1.json`
-and an interactive UI at `/scalar`. The old setting `swaggerUI` is still accepted as a fallback.
-
-## Configuration
-
-The configuration is *JSON* formated in the *appsettings.json* or in the *_config/message-queue.json* file. It is recommended that the settings shown here are configured
-inside the *_config/message-queue.json* file because it will not be overwritten during the update. To update, everything except the *_config* directory can be copied to an an existing installation.
-
-### message-queue.json (appsettings.json)
-
-```
-{
-  "MessageQueue": {
-    "Persist": {
-      "Type": "filesystem",
-      "RootPath": "C:\\temp\\message-queue\\persist"
-    },
-    "Limits": {
-      "MaxQueues": 10000,
-      "MaxMessageBytes": 1048576,
-      "MaxDequeueCount": 1000,
-      "MaxQueueLength": 0
-    }
-  },
-  "Authorization": {
-    "Type": "Basic",
-    "Clients": [
-      {
-        "Id": "admin-client",
-        "Secret": "sha256:<sha256 hex of the secret>",
-        "Roles": [ "admin" ]
-      },
-      {
-        "Id": "worker",
-        "Secret": "pas3w0rd2",
-        "Roles": [ "write" ]
-      },
-      {
-        "Id": "dashboard",
-        "Secret": "pas3w0rd3",
-        "Roles": [ "read" ]
-      }
-    ]
-  }
-}
-```
-
-The queues are managed by default `in memory`. This guarantees a high performance. If the application is terminated (reused/recycled), all queues are also deleted.
-An alternative is the *persistence* of message queues. Only `filesystem` can be specified as `Type` here at the moment. The entries are additionally stored in the path specified under 'RootPath'.
-If the application is terminated and restarted later, the application restores the last state. In the case of very long queues, the application's start-up process can be take a few more seconds.
-Persisted queues with names that are not valid anymore (see queue name rules below) are skipped on startup (a warning is logged, the files are not deleted).
-
-### Limits
-
-`MessageQueue:Limits` protects the service against resource exhaustion. A value `<= 0` means *unlimited*.
-
-| Setting | Default | Description |
-|---|---|---|
-| `MaxQueues` | `10000` | Maximum number of queues. Creating further queues fails. |
-| `MaxMessageBytes` | `1048576` | Maximum size of a single message (UTF-8 bytes). |
-| `MaxDequeueCount` | `1000` | Upper bound for the `count` parameter of `dequeue`. |
-| `MaxQueueLength` | `0` | Maximum number of messages in a single queue. |
-
-### Authorization
-
-Without an `Authorization` section, the message queue is open to all accesses via the *REST API* (a warning is logged at startup).
-For production use, configure `Basic` authentication (currently the only supported type) and list the clients under `Authorization:Clients`.
-
-Access is via `Basic Authentication` and can be specified via the *HTTP Header* (`Authorization: Basic base64(id:secret)`) or url format (`https://clientId:clientSecret@my-server`).
-Basic authentication transfers the credentials in plain text: use HTTPS (directly or via a TLS terminating reverse proxy).
-
-When authentication is enabled, every request requires valid credentials, including `/info`, the OpenAPI document and the Scalar UI. Only the health check endpoints (`/health`, `/alive`) are anonymous.
-
-**Secrets** can be configured in plain text or as SHA-256 hash: `"Secret": "sha256:<64 hex characters>"`. The hash can be created e.g. with
-`printf '%s' 'my-secret' | sha256sum` (Linux) or
-`[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('my-secret')))` (PowerShell).
-
-**Roles** are hierarchical (`admin` includes `write`, `write` includes `read`). A client without `Roles` gets the `admin` role (backward compatibility).
-
-| Role | Allowed methods |
+| Pattern | Matches |
 |---|---|
-| `read` | `info`, `all`, `length`, `properties`, `queuenames` |
-| `write` | `read` + `enqueue`, `dequeue`, `confirmdequeue`, `register`/`remove` for a single queue (no pattern) |
-| `admin` | `write` + `register`/`remove` with patterns, `deletemessage` |
+| `queue1,queue2` | `queue1` and `queue2` |
+| `test.*` | all queues starting with `test.` |
+| `queue1,test.*` | `queue1` and all queues starting with `test.` |
 
-Missing or invalid credentials return `401`, insufficient roles return `403`.
+## Info
 
-### Errors
+`GET /Info` returns the version of the API.
 
-Methods return `success: false` and an `errorMessage` on errors. Only expected errors (e.g. invalid queue name, limit exceeded, queue suspended) return a descriptive message.
-Unexpected errors return `Internal server error`; the details are written to the log.
+=== "HTTP"
 
-## REST Interface (Info)
+    ```http
+    GET /Info
+    ```
 
-### /Info
+=== "curl"
 
-- **Description**: Retrieves information about the MessageQueue.NET API.
-- **Method**: `GET`
+    ```bash
+    curl -u admin-client:secret http://localhost:9091/Info
+    ```
 
-#### Example
+=== "C#"
 
-**Request**
+    ```csharp
+    var info = await client.ApiInfoAsync();
+    Console.WriteLine(info.Version);
+    ```
 
-```http
-GET /Info
-```
-
-**Response**
-
-```json
+```json title="Response"
 {
   "success": true,
   "version": {
-    "major": 1,
+    "major": 4,
     "minor": 0,
     "build": 0,
-    "revision": 1,
+    "revision": 0,
     "majorRevision": 0,
-    "minorRevision": 1
+    "minorRevision": 0
   }
 }
 ```
 
-## REST Interface (Queue)
+## Enqueue
 
-The following functions are provided by the API. The unique name `{id}` of a queue always corresponds to the unique name of the queue.
+`PUT /Queue/enqueue/{id}` adds messages to a queue. The body is a JSON array of strings. A missing queue is created.
 
-The **MessageQueue.NET** API provides functionality to interact with message queues. 
-In this context, an `id` is a unique identifier used to specify a queue. 
-It can only consist of lowercase letters, digits, underscores (`_`), hyphens (`-`), and periods (`.`), with the following rules:
+Enqueue is *all or nothing*: if one message cannot be stored, no message is enqueued.
 
-- it must start with a lowercase letter or digit
-- a period must be followed by a letter, digit, `_` or `-` (no `..`, no trailing period)
-- maximum length: 128 characters
+=== "HTTP"
 
-For example, valid `id` values could be `queue1`, `test.queue`, `appname.main.in` or `my_queue-123`. Invalid are e.g. `.`, `..`, `a..b`, `queue.` or `_queue`.
+    ```http
+    PUT /Queue/enqueue/test.queue1
+    Content-Type: application/json
 
-The API also allows users to query multiple queues at once using an `idPattern`. This pattern can be a comma-separated list of queue identifiers, a wildcard expression, or a combination of both. For instance, `queue1,queue2` would target both `queue1` and `queue2`, while `test.*` would target all queues whose `id` starts with `test.`. A combined pattern like `queue1,test.*` would target `queue1` and all queues starting with `test.`.
+    ["Hello World", "Test Message"]
+    ```
 
-### /Queue/dequeue/{idPattern}
+=== "curl"
 
-Getting values from a waiting snake. The number of values can be specified via `count` (default: 1). If messages are picked up from a queue that does not exist,
-an empty array `[]` is returned and the queue is created (same as with `enqueue` and `register`), so other processes can use '/queue/queuenames' (see below) to determine that this queue has already been queried and that there is a process to handle the messages.
-The parameter `register` is kept for compatibility and has no effect.
+    ```bash
+    curl -u worker:secret -X PUT http://localhost:9091/Queue/enqueue/test.queue1 \
+         -H "Content-Type: application/json" \
+         -d '["Hello World", "Test Message"]'
+    ```
 
-When values are queried using this method, they automatically disappear from the queue and are no longer available for other processes.
+=== "C#"
 
-- **Method**: `POST`
-- **Parameters**:
-  - `idPattern`: String (path, required) - Pattern to match queue IDs.
-  - `count`: Integer (query, optional, default=1) - Number of messages to dequeue (limited by `MaxDequeueCount`).
-  - `register`: Boolean (query, optional, default=false) - No effect; queues are always created on dequeue (kept for compatibility).
+    ```csharp
+    await client.EnqueueAsync(["Hello World", "Test Message"]);
+    ```
 
-#### Example
+=== "mqnet"
 
-**Request**
+    ```bash
+    mqnet http://localhost:9091 -q test.queue1 -c enqueue -m "Hello World"
+    ```
 
-```http
-POST /Queue/dequeue/test.*
+```json title="Response"
+{ "success": true }
 ```
 
-**Response**
+## Dequeue
 
-```json
+`POST /Queue/dequeue/{idPattern}` takes messages from one or more queues. The messages are removed and not
+available for other consumers anymore.
+
+| Parameter | In | Default | Description |
+|---|---|---|---|
+| `idPattern` | path | | Queue name or [pattern](#patterns) |
+| `count` | query | `1` | Number of messages (limited by `MaxDequeueCount`) |
+| `register` | query | `false` | No effect, kept for compatibility |
+
+If a queue does not exist, it is created and `[]` is returned. Other processes can then see with
+[`queuenames`](#queue-names-list) that somebody consumes this queue.
+
+!!! info "Confirmation"
+    If the queue has a `confirmationPeriodSeconds > 0`, the message has `requireConfirmation: true`. Confirm it
+    with [`confirmdequeue`](#confirm-dequeue) within this period, otherwise it goes back into the queue.
+
+=== "HTTP"
+
+    ```http
+    POST /Queue/dequeue/test.*?count=10
+    ```
+
+=== "curl"
+
+    ```bash
+    curl -u worker:secret -X POST "http://localhost:9091/Queue/dequeue/test.*?count=10"
+    ```
+
+=== "C#"
+
+    ```csharp
+    var result = await client.DequeueAsync(count: 10);
+
+    foreach (var message in result.Messages ?? [])
+    {
+        Console.WriteLine($"{message.Queue}: {message.Value}");
+    }
+    ```
+
+=== "mqnet"
+
+    ```bash
+    mqnet http://localhost:9091 -q test.queue1 -c dequeue
+    ```
+
+```json title="Response"
 {
   "success": true,
+  "hashCode": 1234567,
   "messages": [
     {
       "queue": "test.queue1",
       "id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
       "value": "Hello World",
-      "creationDateUTC": "2023-11-03T15:01:02.123Z",
-      "requireConfirmation": false
+      "creationDateUTC": "2025-11-03T15:01:02.123Z",
+      "requireConfirmation": true,
+      "confirmationPeriod": 60
     }
   ]
 }
 ```
 
-### /Queue/confirmdequeue/{id}
+## Confirm dequeue
 
-If the property ``ConfirmationPeriodSeconds`` is defined for the queue (>0), a message must be confirmed within the
-time span. Otherwise, the message is automatically added back to the queue.
-This method confirms that the message has arrived and been successfully processed. With this method, the
+`POST /Queue/confirmdequeue/{id}?messageId={messageId}` confirms that a message was processed. Only then is the
 message finally removed from the queue.
 
-- **Method**: `POST`
-- **Parameters**:
-  - `id`: String (path, required) - ID of the queue.
-  - `messageId`: UUID (query, required) - ID of the message to confirm.
+With authentication enabled, only the client that dequeued the message can confirm it.
 
-#### Example
+=== "HTTP"
 
-**Request**
+    ```http
+    POST /Queue/confirmdequeue/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
+    ```
 
-```http
-POST /Queue/confirmdequeue/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
+=== "curl"
+
+    ```bash
+    curl -u worker:secret -X POST \
+         "http://localhost:9091/Queue/confirmdequeue/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851"
+    ```
+
+=== "C#"
+
+    ```csharp
+    await client.ConfirmDequeueAsync(message.Id);
+    ```
+
+```json title="Response"
+{ "success": true }
 ```
 
-**Response**
+## All messages
 
-```json
-{
-  "success": true
-}
-```
+`GET /Queue/all/{idPattern}` returns the messages of queues without changing them.
 
-### /Queue/enqueue/{id}
+| Parameter | In | Default | Description |
+|---|---|---|---|
+| `max` | query | `0` | Maximum number of messages (`0`: all) |
+| `unconfirmedOnly` | query | `false` | Only messages that were dequeued but not confirmed yet (only queues with `confirmationPeriodSeconds > 0`) |
 
-- **Description**: Enqueues messages into a specified queue.
-- **Method**: `PUT`
-- **Parameters**:
-  - `id`: String (path, required) - ID of the queue.
-- **Request Body**: Array of strings representing the messages.
+=== "HTTP"
 
-#### Example
+    ```http
+    GET /Queue/all/test.*?max=100
+    ```
 
-**Request**
+=== "curl"
 
-```http
-PUT /Queue/enqueue/test.queue1
-Content-Type: application/json
+    ```bash
+    curl -u dashboard:secret "http://localhost:9091/Queue/all/test.*?max=100"
+    ```
 
-["Hello World", "Test Message"]
-```
+=== "C#"
 
-**Response**
+    ```csharp
+    var result = await client.AllMessagesAsync(max: 100);
+    ```
 
-```json
-{
-  "success": true
-}
-```
+The response has the same format as [dequeue](#dequeue).
 
-### /Queue/all/{idPattern}
+## Length
 
-Returns all the values of a queue without affecting it.
-The parameter ``max`` and ``unconfirmedOnly`` are optional.
-``max``: the maximum number of results to be returned
-``unconfirmedOnly``: only messages are returned that have been picked up but not yet by
-Client have been confirmed. Only queues with ``confirmationPeriodSeconds>0`` can return values here.
+`GET /Queue/length/{idPattern}` returns the number of messages per queue.
 
-- **Method**: `GET`
-- **Parameters**:
-  - `idPattern`: String (path, required) - Pattern to match queue IDs.
-  - `max`: Integer (query, optional, default=0) - Maximum number of messages to retrieve.
-  - `unconfirmedOnly`: Boolean (query, optional, default=false) - Indicates whether to retrieve only unconfirmed messages.
+=== "HTTP"
 
-#### Example
+    ```http
+    GET /Queue/length/test.*
+    ```
 
-**Request**
+=== "curl"
 
-```http
-GET /Queue/all/test.*
-```
+    ```bash
+    curl -u dashboard:secret http://localhost:9091/Queue/length/test.*
+    ```
 
-**Response**
+=== "C#"
 
-```json
-{
-  "success": true,
-  "messages": [
-    {
-      "queue": "test.queue1",
-      "id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
-      "value": "Hello World",
-      "creationDateUTC": "2023-11-03T15:01:02.123Z",
-      "requireConfirmation": false
-    }
-  ]
-}
-```
+    ```csharp
+    var result = await client.LengthAsync();
+    ```
 
-### /Queue/length/{idPattern}
-
-- **Description**: Retrieves the length of the specified queue(s).
-- **Method**: `GET`
-- **Parameters**:
-  - `idPattern`: String (path, required) - Pattern to match queue IDs.
-
-#### Example
-
-**Request**
-
-```http
-GET /Queue/length/test.*
-```
-
-**Response**
-
-```json
+```json title="Response"
 {
   "success": true,
   "queues": {
-    "test.queue1": {
-      "queueLength": 1,
-      "unconfirmedItems": 0
-    }
+    "test.queue1": { "queueLength": 1, "unconfirmedItems": 0 }
   }
 }
 ```
 
-### /Queue/remove/{idPattern}
+## Register
 
-- **Description**: Removes the specified queue(s) or messages within them.
-- **Method**: `DELETE`
-- **Parameters**:
-  - `idPattern`: String (path, required) - Pattern to match queue IDs.
-  - `removeType`: Integer (query, required) - Type of removal (0: Remove Queue, 1: Remove All Items, 2: Remove Unconfirmed Items).
+`PUT /Queue/register/{idPattern}` creates a queue (if it does not exist) or changes the properties of existing
+queues. All parameters are optional query parameters; omitted parameters keep their current value.
 
-#### Example
+| Property | Type | Description |
+|---|---|---|
+| `lifetimeSeconds` | int | The queue is deleted after it was empty and unused for this time. `0`: never. |
+| `itemLifetimeSeconds` | int | Messages not picked up within this time are deleted. `0`: never. |
+| `confirmationPeriodSeconds` | int | Dequeued messages must be [confirmed](#confirm-dequeue) within this time, otherwise they go back into the queue. `0`: no confirmation. |
+| `maxUnconfirmedItems` | int | Maximum number of dequeued but unconfirmed messages. When reached, `dequeue` returns nothing until messages are confirmed. |
+| `maxUnconfirmedItemsStrategy` | int | `0` *Absolute*: the maximum applies to the queue. `1` *PerClient*: the maximum applies to each client. |
+| `suspendEnqueue` | bool | `true`: no messages can be added. |
+| `suspendDequeue` | bool | `true`: no messages can be taken. The messages are kept. |
 
-**Request**
+=== "HTTP"
 
-```http
-DELETE /Queue/remove/test.*?removeType=0
-```
+    ```http
+    PUT /Queue/register/orders?lifetimeSeconds=3600&confirmationPeriodSeconds=60
+    ```
 
-**Response**
+=== "curl"
 
-```json
-{
-  "success": true
-}
-```
+    ```bash
+    curl -u worker:secret -X PUT \
+         "http://localhost:9091/Queue/register/orders?lifetimeSeconds=3600&confirmationPeriodSeconds=60"
+    ```
 
-### /Queue/deletemessage/{id}
+=== "C#"
 
-Delete a single message from an queue
+    ```csharp
+    await client.RegisterAsync(lifetimeSeconds: 3600, confirmationPeriodSeconds: 60);
+    ```
 
-- **Method**: `DELETE`
-- **Parameters**:
-  - `id`: String (path, required) - ID of the queue.
-  - `messageId`: UUID (query, required) - ID of the message to confirm.
+=== "mqnet"
 
-#### Example
+    ```text
+    >> orders register
+    ```
 
-**Request**
+The response has the same format as [properties](#properties).
 
-```http
-DELETE /Queue/deletemessage/test?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
-```
+## Properties
 
-**Response**
+`GET /Queue/properties/{idPattern}` returns the properties and the state of queues.
+Requests with the header `X-MQ-SilentAccess: true` do not update `lastAccessUTC` (used by the dashboard).
 
-```json
-{
-  "success": true
-}
-```
+=== "HTTP"
 
-### /Queue/register/{idPattern}
+    ```http
+    GET /Queue/properties/orders
+    ```
 
-Creates a queue with no values (if the queue does not already exist). Other processes can then see the queue using `/queue/queuenames`.
-If the queue already exists, this method can be used to change the properties of the queue.
+=== "curl"
 
-- **lifetimeSeconds <int>**: 
-If the queue is empty for longer than the time specified here, it is automatically deleted. a value of ``0`` means that the queue is never automatically deleted
+    ```bash
+    curl -u dashboard:secret http://localhost:9091/Queue/properties/orders
+    ```
 
-- **itemLifetimeSeconds <int>**: 
-If a message is not picked up under the time span shown here, it is automatically deleted. A value of ``0`` means that messages are never automatically deleted.
+=== "C#"
 
-- **confirmationPeriodSeconds <int>**: 
-This value can be used to ensure that the successful processing of a message from the client
-must be confirmed. Otherwise, this message is automatically added back to the queue.
-A value ``0`` means that messages do not have to be confirmed and disappear completely from the queue after a ``dequeue``.
+    ```csharp
+    var result = await client.PropertiesAsync();
+    ```
 
-- **maxUnconfirmedItems <int>**:
-Maximum number than can be dequeued and be in an unconfirmed status. If this number is reached, no ``dequeue`` is possible until items will get confirmed
-
-- **maxUnconfirmedItemsStrategy <int>**:
-The strategy, the maximum for unconfirmed items are calculated:
-  * 0 ... **Absolute** maxUnconfirmedItems is the absolute value
-  * 1 ... **Per Client** maxUnconfirmedItems is per client
-
-- **suspendEnqueue <bool>**: 
-If you set this werr to ``true``, no more values can be added to this queue until the value is set back to ``false``.
-
-- **suspendDequeue <bool>**: 
-If you set this value to ``true``, no messages can be retrieved from this queue. The messages are not deleted. If you set the value back to ``false``, the queue can be processed again.
-
-- **Method**: `PUT`
-- **Parameters**:
-  - `idPattern`: String (path, required) - Pattern to match queue IDs.
-  - `lifetimeSeconds`, `itemLifetimeSeconds`, `confirmationPeriodSeconds`, `maxUnconfirmedItems`: Integer (query, optional) - Queue properties.
-  - `suspendEnqueue`, `suspendDequeue`: Boolean (query, optional) - Suspend enqueue or dequeue operations.
-
-#### Example
-
-**Request**
-
-```http
-PUT /Queue/register/test.*?lifetimeSeconds=3600
-```
-
-**Response**
-
-```json
+```json title="Response"
 {
   "success": true,
+  "hashCode": 1234567,
   "queues": {
-    "test.queue1": {
-      "lastAccessUTC": "2023-11-03T15:01:02.123Z",
-      "lastModifiedUTC": "2023-11-03T15:01:02.123Z",
-      "creationDateUTC": "2023-11-03T15:01:02.123Z",
-      "queueLength": 0,
+    "orders": {
+      "lastAccessUTC": "2025-11-03T15:01:02.123Z",
+      "lastModifiedUTC": "2025-11-03T15:01:02.123Z",
+      "length": 0,
       "unconfirmedItems": 0,
-      "lifespanSeconds": 3600
+      "dequeuingClientsCount": 0,
+      "dequeuingClients": {},
+      "lifetimeSeconds": 3600,
+      "itemLifetimeSeconds": 0,
+      "confirmationPeriodSeconds": 60,
+      "maxUnconfirmedItems": null,
+      "maxUnconfirmedItemsStrategy": 0,
+      "suspendEnqueue": false,
+      "suspendDequeue": false
     }
   }
 }
 ```
 
-### /Queue/queuenames
+## Queue names (list)
 
-Returns the names (ids) of all queues
+`GET /Queue/queuenames` returns the names of all queues.
 
+=== "HTTP"
 
-[Client Library](../client/client_en.md)
+    ```http
+    GET /Queue/queuenames
+    ```
+
+=== "curl"
+
+    ```bash
+    curl -u dashboard:secret http://localhost:9091/Queue/queuenames
+    ```
+
+=== "C#"
+
+    ```csharp
+    var result = await client.QueueNamesAsync();
+    ```
+
+```json title="Response"
+{ "success": true, "queueNames": [ "orders", "test.queue1" ] }
+```
+
+## Remove
+
+`DELETE /Queue/remove/{idPattern}?removeType={removeType}` removes queues or their messages.
+
+| `removeType` | Description |
+|---|---|
+| `0` (default) | Remove the queue |
+| `1` | Remove all messages |
+| `2` | Remove the unconfirmed messages |
+
+=== "HTTP"
+
+    ```http
+    DELETE /Queue/remove/test.*?removeType=0
+    ```
+
+=== "curl"
+
+    ```bash
+    curl -u admin-client:secret -X DELETE "http://localhost:9091/Queue/remove/test.*?removeType=0"
+    ```
+
+=== "C#"
+
+    ```csharp
+    await client.RemoveAsync(RemoveType.Queue);
+    ```
+
+```json title="Response"
+{ "success": true }
+```
+
+## Delete message
+
+`DELETE /Queue/deletemessage/{id}?messageId={messageId}` deletes a single message from a queue.
+
+=== "HTTP"
+
+    ```http
+    DELETE /Queue/deletemessage/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851
+    ```
+
+=== "curl"
+
+    ```bash
+    curl -u admin-client:secret -X DELETE \
+         "http://localhost:9091/Queue/deletemessage/test.queue1?messageId=d290f1ee-6c54-4b01-90e6-d701748f0851"
+    ```
+
+=== "C#"
+
+    ```csharp
+    await client.DeleteMessage(message.Id);
+    ```
+
+```json title="Response"
+{ "success": true }
+```

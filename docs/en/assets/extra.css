@@ -1,0 +1,9 @@
+/* Excalidraw diagrams have a white background; keep them readable as a card in light and dark mode */
+.md-typeset img.mq-diagram {
+  display: block;
+  width: 100%;
+  margin: 1.5em auto;
+  border-radius: 0.6em;
+  box-shadow: var(--md-shadow-z1);
+  background: #ffffff;
+}

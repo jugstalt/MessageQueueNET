@@ -61,7 +61,7 @@ All notable changes to this project are documented in this file.
 
 ### Build & Deployment
 
-- Build, test, pack and publish with [Nuke](https://nuke.build) (`./build.ps1`, `./build.sh`); see [doc/release_en.md](doc/release_en.md).
+- Build, test, pack and publish with [Nuke](https://nuke.build) (`./build.ps1`, `./build.sh`); see the [build & release documentation](https://docs.gviewonline.com/other/messagequeue-net/release.html).
 - One version for all packages and images, taken from the git tag `v*` ([MinVer](https://github.com/adamralph/minver)).
 - Central package management (`Directory.Packages.props`), shared metadata in `Directory.Build.props` (SourceLink, symbol packages, README in the packages).
 - One solution file `MessageQueueNET.slnx` (replaces `MessageQueueNET.sln` and `MessageQueueNET.Clients.sln`).

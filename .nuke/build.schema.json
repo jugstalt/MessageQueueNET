@@ -28,6 +28,8 @@
         "Compile",
         "DockerBuild",
         "DockerPush",
+        "Docs",
+        "DocsPublish",
         "NuGetPush",
         "Pack",
         "PrintVersion",
@@ -119,6 +121,10 @@
         "ContainerRegistry": {
           "type": "string",
           "description": "Container registry including owner - Default is 'ghcr.io/jugstalt'"
+        },
+        "DocsRepository": {
+          "type": "string",
+          "description": "Checkout of docs-gviewonline for DocsPublish - Default is the folder docs-gviewonline next to this repository"
         },
         "NuGetApiKey": {
           "type": "string",

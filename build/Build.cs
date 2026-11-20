@@ -34,6 +34,11 @@ class Build : NukeBuild
     [Parameter("Container CLI with docker compatible build/push commands (e.g. 'wslc', 'podman') - Default is 'docker'")]
     readonly string ContainerCli = "docker";
 
+    [Parameter("Checkout of docs-gviewonline for DocsPublish - Default is the folder docs-gviewonline next to this repository")]
+    readonly string DocsRepository;
+
+    const string DocsFolder = "messagequeue-net";
+
     Tool _containerTool;
     Tool Docker => _containerTool ??= ToolResolver.GetPathTool(ContainerCli);
 
@@ -254,6 +259,69 @@ class Build : NukeBuild
 
             ArtifactsDirectory.CreateDirectory();
             ReleaseNotesFile.WriteAllText(notes + Environment.NewLine);
+        });
+
+    // Static documentation site (MkDocs Material, see mkdocs.yml) in artifacts/docs/site.
+    // Needs Python; without it the target is skipped with a warning.
+    Target Docs => _ => _
+        .Executes(() =>
+        {
+            // never publish the site of an earlier build when this one is skipped or fails
+            (ArtifactsDirectory / "docs").DeleteDirectory();
+
+            // MkDocs in its own virtual environment .venv-docs, created on the first run
+            var venv = RootDirectory / ".venv-docs";
+            var python = OperatingSystem.IsWindows() ? venv / "Scripts" / "python.exe" : venv / "bin" / "python";
+            if (!python.FileExists())
+            {
+                var check = ProcessTasks.StartProcess("python", $"-m venv \"{venv}\"", workingDirectory: RootDirectory, logger: (_, _) => { }, timeout: 120000);
+                check.WaitForExit();
+                if (check.ExitCode != 0 || !python.FileExists())
+                {
+                    Log.Warning("Docs skipped: Python not found (needed for MkDocs)");
+                    return;
+                }
+            }
+
+            ProcessTasks.StartProcess(python, "-m pip install --quiet --disable-pip-version-check -r docs/requirements.txt",
+                    workingDirectory: RootDirectory,
+                    logger: (_, text) => Log.Debug(text))
+                .AssertZeroExitCode();
+
+            // strict: broken links fail the build
+            ProcessTasks.StartProcess(python, "-m mkdocs build --strict --clean",
+                    workingDirectory: RootDirectory,
+                    logger: (_, text) => Log.Information(text))
+                .AssertZeroExitCode();
+
+            Log.Information("Docs site: {Site}", ArtifactsDirectory / "docs" / "site");
+        });
+
+    // Mirrors the site into app/other/messagequeue-net of the docs-gviewonline repository, whose app folder
+    // a GitHub action deploys as it is. Nothing is committed or pushed here; do that in docs-gviewonline.
+    //   .\build.cmd DocsPublish
+    //   .\build.cmd DocsPublish --docs-repository D:\github\docs-gviewonline
+    Target DocsPublish => _ => _
+        .DependsOn(Docs)
+        .Executes(() =>
+        {
+            var site = ArtifactsDirectory / "docs" / "site";
+            Assert.DirectoryExists(site, "The Docs target made no site (is Python installed?)");
+
+            var repository = DocsRepository is null ? RootDirectory.Parent / "docs-gviewonline" : (AbsolutePath)DocsRepository;
+            if (!(repository / "app").DirectoryExists())
+            {
+                Log.Warning("{Repository} is no checkout of docs-gviewonline (no app folder); set --docs-repository. Docs not copied.", repository);
+                return;
+            }
+
+            var target = repository / "app" / "other" / DocsFolder;
+
+            // mirror, not merge: renamed or removed pages must not stay behind
+            target.DeleteDirectory();
+            site.Copy(target, ExistsPolicy.MergeAndOverwrite);
+
+            Log.Information("Docs copied to {Target}. Commit and push it in {Repository} to publish.", target, repository);
         });
 
     void PublishWebApp(AbsolutePath project, string runtime, AbsolutePath output)

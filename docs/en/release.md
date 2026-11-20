@@ -6,7 +6,7 @@ MessageQueueNET is built with [Nuke](https://nuke.build). The same targets run l
 
 Requires the .NET 10 SDK (and Docker for the image targets).
 
-```
+```powershell
 ./build.ps1                 # Windows (default target: Test)
 ./build.sh                  # Linux/macOS
 ./build.ps1 Clean Test Pack Zip
@@ -25,6 +25,8 @@ Requires the .NET 10 SDK (and Docker for the image targets).
 | `ReleaseNotes` | Extracts the section of the current version from `CHANGELOG.md` | `artifacts/release-notes.md` |
 | `NuGetPush` | Pushes the packages (`--nuget-api-key` required) | |
 | `DockerPush` | Pushes the images | |
+| `Docs` | Builds this documentation with MkDocs (requires Python 3) | `artifacts/docs` |
+| `DocsPublish` | Copies the documentation into a checkout of [docs-gviewonline](https://github.com/jugstalt/docs-gviewonline) | `app/other/messagequeue-net` |
 
 The push targets are meant for the release workflow.
 
@@ -47,7 +49,7 @@ The version numbers in the project files are not used anymore.
    git push origin v4.1.0
    ```
 
-The workflow [release.yml](../.github/workflows/release.yml) then:
+The workflow [release.yml](https://github.com/jugstalt/MessageQueueNET/blob/master/.github/workflows/release.yml) then:
 
 - builds and tests,
 - pushes the NuGet packages to nuget.org (`MessageQueueNET.Core`, `.Client`, `.Worker`, `.Aspire.Hosting`, `.Cmd`),
@@ -83,4 +85,4 @@ After the first release, check the packages `messagequeue-net` and `messagequeue
 
 ## CI
 
-[ci.yml](../.github/workflows/ci.yml) runs `./build.sh Test Pack` for pushes to `master` and `v4` and for pull requests. Test results and packages are uploaded as workflow artifacts.
+[ci.yml](https://github.com/jugstalt/MessageQueueNET/blob/master/.github/workflows/ci.yml) runs `./build.sh Test Pack` for pushes to `master` and `v4` and for pull requests. Test results and packages are uploaded as workflow artifacts.
