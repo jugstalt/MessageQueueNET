@@ -77,6 +77,7 @@ namespace MessageQueueNET.Extensions
             return hashCode;
         }
 
-        static public int CalcHashCode(this Queue queue) => queue.LastAccessUTC.GetHashCode();
+        // same calculation as for collections => hash codes from single queue results can be used for polling
+        static public int CalcHashCode(this Queue queue) => new[] { queue }.CalcHashCode();
     }
 }

@@ -9,7 +9,9 @@ namespace MessageQueueNET.Models
     public class Queue : IEnumerable<QueueItem> //: ConcurrentQueue<QueueItem>
     {
         private QueueProperties _queueProperties;
-        private ConcurrentQueue<QueueItem> _nestedQueue;
+        // _nestedQueue is replaced by TryDelete => all mutations are synchronized
+        private volatile ConcurrentQueue<QueueItem> _nestedQueue;
+        private readonly object _syncRoot = new object();
 
         public Queue(string name)
         {
@@ -29,13 +31,16 @@ namespace MessageQueueNET.Models
 
         public bool TryDelete(Guid id)
         {
-            if (_nestedQueue.Any(i => i.Id == id))
+            lock (_syncRoot)
             {
-                _nestedQueue = new ConcurrentQueue<QueueItem>(_nestedQueue.Where(i => i.Id != id));
-                return true;
-            }
+                if (_nestedQueue.Any(i => i.Id == id))
+                {
+                    _nestedQueue = new ConcurrentQueue<QueueItem>(_nestedQueue.Where(i => i.Id != id));
+                    return true;
+                }
 
-            return false;
+                return false;
+            }
         }
 
         public QueueProperties Properties
@@ -47,14 +52,32 @@ namespace MessageQueueNET.Models
             }
         }
 
-        public bool TryDequeue(out QueueItem? item) => _nestedQueue.TryDequeue(out item);
+        public bool TryDequeue(out QueueItem? item)
+        {
+            lock (_syncRoot)
+            {
+                return _nestedQueue.TryDequeue(out item);
+            }
+        }
 
-        public void Enqueue(QueueItem item) => _nestedQueue.Enqueue(item);
+        public void Enqueue(QueueItem item)
+        {
+            lock (_syncRoot)
+            {
+                _nestedQueue.Enqueue(item);
+            }
+        }
 
         #region Nested
 
         public int Count => _nestedQueue.Count;
-        public void Clear() => _nestedQueue.Clear();
+        public void Clear()
+        {
+            lock (_syncRoot)
+            {
+                _nestedQueue.Clear();
+            }
+        }
 
         #region IEnumerable<QueueItem>
 
