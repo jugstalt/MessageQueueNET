@@ -112,6 +112,10 @@
           "type": "string",
           "description": "Configuration to build - Default is 'Release'"
         },
+        "ContainerCli": {
+          "type": "string",
+          "description": "Container CLI with docker compatible build/push commands (e.g. 'wslc', 'podman') - Default is 'docker'"
+        },
         "ContainerRegistry": {
           "type": "string",
           "description": "Container registry including owner - Default is 'ghcr.io/jugstalt'"
