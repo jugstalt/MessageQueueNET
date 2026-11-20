@@ -1,6 +1,8 @@
+using MessageQueueNET.Exceptions;
 ﻿using MessageQueueNET.Extensions;
 using MessageQueueNET.Models;
 using MessageQueueNET.Services.Abstraction;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -13,17 +15,26 @@ public class QueuesService
 {
     private readonly ConcurrentDictionary<string, Queue> _queues;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, QueueItem>> _unconfirmedItems;
+    private readonly MessageQueueLimitsOptions _limits;
 
-    public QueuesService()
+    public QueuesService(IOptions<MessageQueueLimitsOptions> limits)
     {
         _queues = new ConcurrentDictionary<string, Queue>();
         _unconfirmedItems = new ConcurrentDictionary<string, ConcurrentDictionary<Guid, QueueItem>>();
+        _limits = limits.Value;
     }
 
-    public IEnumerable<Queue> GetQueues(string queueNamePattern, bool forAccess = true)
+    public MessageQueueLimitsOptions Limits => _limits;
+
+    public IEnumerable<Queue> GetQueues(string queueNamePattern, bool forAccess = true, bool createIfNotExists = true)
     {
         if (!queueNamePattern.IsPattern())
         {
+            if (!createIfNotExists && !_queues.ContainsKey(queueNamePattern))
+            {
+                return Array.Empty<Queue>();
+            }
+
             return new Queue[] { GetQueue(queueNamePattern, forAccess) };
         }
 
@@ -49,10 +60,21 @@ public class QueuesService
     }
 
     public Queue GetQueue(string queueName, bool forAccess = true)
+        => GetQueue(queueName, forAccess, ignoreLimits: false);
+
+    private Queue GetQueue(string queueName, bool forAccess, bool ignoreLimits)
     {
         if (!queueName.IsValidQueueName())
         {
-            throw new ArgumentException("Invalid queue name. Only lowercase characters, numbers, minus, underscore and point are allwed");
+            throw new MessageQueueException($"Invalid queue name. Allowed are lowercase characters, numbers, minus, underscore and single points between them (must start with a character or number, max. {StringExtensions.MaxQueueNameLength} characters)");
+        }
+
+        if (!ignoreLimits
+            && _limits.MaxQueues > 0
+            && !_queues.ContainsKey(queueName)
+            && _queues.Count >= _limits.MaxQueues)
+        {
+            throw new MessageQueueException($"Maximum number of queues ({_limits.MaxQueues}) reached");
         }
 
         var queue = _queues.GetOrAdd(queueName, (key) => new Queue(queueName));
@@ -156,10 +178,13 @@ public class QueuesService
             {
                 foreach (var queueItem in unconfirmedItems.Values
                                                           .ToArray()
-                                                          .Where(i => (DateTime.UtcNow - i.CreationDateUTC).TotalSeconds > queue.Properties.ConfirmationPeriodSeconds))
+                                                          .Where(i => (DateTime.UtcNow - i.UnconfirmedSinceUTC).TotalSeconds > queue.Properties.ConfirmationPeriodSeconds))
                 {
                     if (unconfirmedItems.TryRemove(queueItem.Id, out QueueItem? item))
                     {
+                        item.DequeuedUTC = null;
+                        item.DequeuingClientId = "";
+
                         if (await persist.RemoveUnconfirmedQueueItem(queue.Name, item.Id) &&
                             await persist.PersistQueueItem(queue.Name, item))
                         {
@@ -303,7 +328,7 @@ public class QueuesService
     {
         try
         {
-            var queue = GetQueue(queueName);
+            var queue = GetQueue(queueName, forAccess: true, ignoreLimits: true);
             queue.Properties = properties;
             queue.Clear();
 

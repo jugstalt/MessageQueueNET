@@ -93,7 +93,7 @@ public class QueueClient : IQueueClient
         int? hashCode = null,
         int? maxPollingSeconds = null)
     {
-        using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/dequeue/{_queueName}?count={count}&register={register}"))
+        using (var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"{_apiUrl}/queue/dequeue/{_queueName}?count={count}&register={register}"))
         {
             ModifyHttpRequest(requestMessage, hashCode, maxPollingSeconds);
 
@@ -108,7 +108,7 @@ public class QueueClient : IQueueClient
 
     async public Task<ApiResult> ConfirmDequeueAsync(Guid messageId)
     {
-        using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/confirmdequeue/{_queueName}?messageId={messageId}"))
+        using (var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"{_apiUrl}/queue/confirmdequeue/{_queueName}?messageId={messageId}"))
         {
             ModifyHttpRequest(requestMessage);
 
@@ -143,7 +143,7 @@ public class QueueClient : IQueueClient
 
     async public Task<ApiResult> DeleteMessage(Guid messageId)
     {
-        using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/deletemessage/{_queueName}?messageId={messageId}"))
+        using (var requestMessage = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/queue/deletemessage/{_queueName}?messageId={messageId}"))
         {
             ModifyHttpRequest(requestMessage);
 
@@ -188,7 +188,7 @@ public class QueueClient : IQueueClient
 
     async public Task<ApiResult> RemoveAsync(RemoveType removeType = RemoveType.Queue)
     {
-        using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/remove/{_queueName}?removeType={removeType}"))
+        using (var requestMessage = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/queue/remove/{_queueName}?removeType={removeType}"))
         {
             ModifyHttpRequest(requestMessage);
 
@@ -240,7 +240,7 @@ public class QueueClient : IQueueClient
             urlParameters.Add($"suspendDequeue={suspendDequeue.Value}");
         }
 
-        using (var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/queue/register/{_queueName}?{String.Join("&", urlParameters)}"))
+        using (var requestMessage = new HttpRequestMessage(HttpMethod.Put, $"{_apiUrl}/queue/register/{_queueName}?{String.Join("&", urlParameters)}"))
         {
             ModifyHttpRequest(requestMessage);
 

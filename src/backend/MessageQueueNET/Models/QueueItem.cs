@@ -12,6 +12,7 @@ namespace MessageQueueNET.Models
 
         public Guid Id { get; set; }
         public DateTime CreationDateUTC { get; set; }
+        public DateTime? DequeuedUTC { get; set; }
         public string Message { get; set; } = "";
         public string DequeuingClientId { get; set; } = "";
 
@@ -20,14 +21,22 @@ namespace MessageQueueNET.Models
             this.CreationDateUTC = DateTime.UtcNow;
         }
 
-        public QueueItem Clone()
+        // Keeps the original CreationDateUTC, so ItemLifetimeSeconds is not reset when an
+        // unconfirmed item is re-enqueued.
+        public QueueItem CloneForUnconfirmed(string clientId)
         {
             return new QueueItem()
             {
                 Id = this.Id,
-                Message = this.Message
+                Message = this.Message,
+                CreationDateUTC = this.CreationDateUTC,
+                DequeuedUTC = DateTime.UtcNow,
+                DequeuingClientId = clientId
             };
         }
+
+        // Items persisted by older versions have no DequeuedUTC; there CreationDateUTC was the dequeue time.
+        public DateTime UnconfirmedSinceUTC => DequeuedUTC ?? CreationDateUTC;
 
         public bool IsValid(Queue queue)
         {

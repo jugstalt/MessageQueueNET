@@ -36,17 +36,13 @@ static internal class HttpRequestExtensions
 
     static public int MaxPollingSeconds(this HttpRequest httpRequest, int defaultMaxPollingSeconds)
     {
-        if (!httpRequest.Headers.TryGetValue(MQHeaders.MaxPollingSeconds, out var result))
+        if (!httpRequest.Headers.TryGetValue(MQHeaders.MaxPollingSeconds, out var result)
+            || !int.TryParse(result.ToString(), out var requestedSeconds))
         {
             return defaultMaxPollingSeconds;
         }
 
-        return Math.Max(1,
-            Math.Min(
-                defaultMaxPollingSeconds, 
-                int.Parse(httpRequest.Headers[MQHeaders.MaxPollingSeconds]!)
-            )
-        );
+        return Math.Max(1, Math.Min(defaultMaxPollingSeconds, requestedSeconds));
     }
 
     static public bool IsSlientAccess(this HttpRequest httpRequest)

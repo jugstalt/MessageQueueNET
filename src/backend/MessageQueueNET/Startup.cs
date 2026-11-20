@@ -66,12 +66,19 @@ namespace MessageQueueNET
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app,
                               IWebHostEnvironment env,
-                              RestorePersistedQueuesService restoreQueues,
                               IMessageQueueApiVersionService appVersion)
         {
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
+            }
+
+            bool basicAuthentication = BasicAuthenticationMiddleware.IsEnabled(Configuration);
+
+            // authentication first => nothing (swagger, long polling, queue access) runs for anonymous requests
+            if (basicAuthentication)
+            {
+                app.UseMiddleware<BasicAuthenticationMiddleware>();
             }
 
             if (env.IsDevelopment() || "true".Equals(Configuration["swaggerUI"], StringComparison.OrdinalIgnoreCase))
@@ -80,22 +87,16 @@ namespace MessageQueueNET
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("../swagger/v2/swagger.json", $"MessageQueue.NET v{appVersion.Version}"));
             }
 
-            restoreQueues.Restore().Wait();
-
             //app.UseHttpsRedirection();
 
             app.UseRouting();
 
-            app.UseAuthorization();
+            if (basicAuthentication)
+            {
+                app.UseMiddleware<RoleAuthorizationMiddleware>();
+            }
 
             app.UseMiddleware<HashCodeMiddleware>();
-
-            switch (Configuration["Authorization:Type"]?.ToLower())
-            {
-                case "basic":
-                    app.UseMiddleware<BasicAuthenticationMiddleware>();
-                    break;
-            }
 
             app.UseEndpoints(endpoints =>
             {

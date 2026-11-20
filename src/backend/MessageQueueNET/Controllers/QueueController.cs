@@ -1,34 +1,44 @@
 ﻿using MessageQueueNET.Client;
 using MessageQueueNET.Client.Models;
 using MessageQueueNET.Core.Concurrency;
+using MessageQueueNET.Exceptions;
 using MessageQueueNET.Extensions;
+using MessageQueueNET.Middleware.Authentication;
 using MessageQueueNET.Models;
+using MessageQueueNET.Models.Authentication;
 using MessageQueueNET.Services;
 using MessageQueueNET.Services.Abstraction;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace MessageQueueNET.Controllers
 {
     [Route("[controller]")]
     [ApiController]
+    [RequiredRole(ClientRole.Admin)]
     public class QueueController : ControllerBase
     {
         private readonly QueuesService _queues;
         private readonly IQueuesPersistService _persist;
+        private readonly ILogger<QueueController> _logger;
 
         public QueueController(QueuesService queues,
-                               IQueuesPersistService persist)
+                               IQueuesPersistService persist,
+                               ILogger<QueueController> logger)
         {
             _queues = queues;
             _persist = persist;
+            _logger = logger;
         }
 
-        [HttpGet]
+        [HttpPost]
         [Route("dequeue/{idPattern}")]
+        [RequiredRole(ClientRole.Write)]
         async public Task<MessagesResult> Dequeue(string idPattern, int count = 1, bool register = false)
         {
             try
@@ -39,6 +49,10 @@ namespace MessageQueueNET.Controllers
                 {
                     _queues.GetQueue(idPattern);  // register Queue
                 }
+
+                count = Math.Max(1, _queues.Limits.MaxDequeueCount > 0
+                    ? Math.Min(count, _queues.Limits.MaxDequeueCount)
+                    : count);
 
                 var queryQueues = _queues.GetQueues(idPattern);
                 var result = new MessagesResult(queryQueues.CalcHashCode());
@@ -65,19 +79,27 @@ namespace MessageQueueNET.Controllers
 
                         if (queue.TryDequeue(out QueueItem? item))
                         {
+                            modifiedQueues.Add(queue);
+
+                            if (!item!.IsValid(queue))
+                            {
+                                // expired => drop it (never move it to the unconfirmed items)
+                                await _persist.RemoveQueueItem(queue.Name, item.Id);
+                                continue;
+                            }
+
                             if (queue.Properties.ConfirmationPeriodSeconds > 0)
                             {
-                                var unconfirmedItem = item!.Clone();
-                                unconfirmedItem.DequeuingClientId = clientId;
+                                var unconfirmedItem = item.CloneForUnconfirmed(clientId);
                                 if (!await _persist.PersistUnconfirmedQueueItem(queue.Name, unconfirmedItem))
                                 {
-                                    throw new Exception("Can't unable to persist unconfirmed queue item");
+                                    throw new Exception("Unable to persist unconfirmed queue item");
                                 }
 
                                 _queues.AddToUnconfirmedMessage(queue, unconfirmedItem);
                             }
 
-                            if (await _persist.RemoveQueueItem(queue.Name, item!.Id) && item.IsValid(queue))
+                            if (await _persist.RemoveQueueItem(queue.Name, item.Id))
                             {
                                 items.Add(new MessageResult()
                                 {
@@ -88,8 +110,6 @@ namespace MessageQueueNET.Controllers
                                     ConfirmationPeriod = queue.Properties.RequireConfirmation() ? queue.Properties.ConfirmationPeriodSeconds : null,
                                 });
                             }
-
-                            modifiedQueues.Add(queue);
                         }
                     }
 
@@ -104,17 +124,22 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new MessagesResult().AddExceptionMessage(ex);
+                return new MessagesResult().AddExceptionMessage(ex, _logger);
             }
         }
 
-        [HttpGet]
+        [HttpPost]
         [Route("confirmdequeue/{id}")]
+        [RequiredRole(ClientRole.Write)]
         async public Task<ApiResult> ConfirmDequeue(string id, Guid messageId)
         {
             try
             {
-                var queue = _queues.GetQueue(id);
+                var queue = _queues.GetQueues(id, createIfNotExists: false).FirstOrDefault();
+                if (queue is null || id.IsPattern())
+                {
+                    throw new MessageQueueException($"Queue {id} not found");
+                }
 
                 var result = new ApiResult(queue.CalcHashCode());
 
@@ -131,24 +156,41 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new ApiResult().AddExceptionMessage(ex);
+                return new ApiResult().AddExceptionMessage(ex, _logger);
             }
         }
 
         [HttpPut]
         [Route("enqueue/{id}")]
+        [RequiredRole(ClientRole.Write)]
         async public Task<ApiResult> Enqueue(string id, IEnumerable<string> messages)
         {
             try
             {
+                var messageArray = messages?.Select(m => m ?? "").ToArray()
+                    ?? throw new MessageQueueException("No messages");
+
+                var limits = _queues.Limits;
+                if (limits.MaxMessageBytes > 0
+                    && messageArray.Any(m => Encoding.UTF8.GetByteCount(m) > limits.MaxMessageBytes))
+                {
+                    throw new MessageQueueException($"Message exceeds the maximum size of {limits.MaxMessageBytes} bytes");
+                }
+
                 var queue = _queues.GetQueue(id);
 
                 if (queue.Properties.SuspendEnqueue == true)
                 {
-                    throw new Exception($"Enqueue suspended");
+                    throw new MessageQueueException($"Enqueue suspended");
                 }
 
-                foreach (var message in messages)
+                if (limits.MaxQueueLength > 0
+                    && queue.Count + messageArray.Length > limits.MaxQueueLength)
+                {
+                    throw new MessageQueueException($"Maximum queue length ({limits.MaxQueueLength}) exceeded");
+                }
+
+                foreach (var message in messageArray)
                 {
                     var item = new QueueItem() { Message = message };
                     if (!await _persist.PersistQueueItem(id, item))
@@ -165,20 +207,26 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new ApiResult().AddExceptionMessage(ex);
+                return new ApiResult().AddExceptionMessage(ex, _logger);
             }
         }
 
-        [HttpGet]
+        [HttpDelete]
         [Route("deletemessage/{id}")]
+        [RequiredRole(ClientRole.Admin)]
         async public Task<ApiResult> DeleteMessage(string id, Guid messageId)
         {
             try
             {
-                var queue = _queues.GetQueue(id);
+                var queue = _queues.GetQueues(id, createIfNotExists: false).FirstOrDefault();
+                if (queue is null || id.IsPattern())
+                {
+                    throw new MessageQueueException($"Queue {id} not found");
+                }
+
                 var success = queue.TryDelete(messageId);
 
-                if(success)
+                if (success)
                 {
                     await _persist.RemoveQueueItem(queue.Name, messageId);
                     queue.SetModified();
@@ -188,12 +236,13 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new ApiResult().AddExceptionMessage(ex);
+                return new ApiResult().AddExceptionMessage(ex, _logger);
             }
         }
 
         [HttpGet]
         [Route("all/{idPattern}")]
+        [RequiredRole(ClientRole.Read)]
         public MessagesResult AllMessages(string idPattern, int max = 0, bool unconfirmedOnly = false)
         {
             try
@@ -244,7 +293,7 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                new MessagesResult().AddExceptionMessage(ex);
+                return new MessagesResult().AddExceptionMessage(ex, _logger);
             }
 
             return new MessagesResult(0);
@@ -252,6 +301,7 @@ namespace MessageQueueNET.Controllers
 
         [HttpGet]
         [Route("length/{idPattern}")]
+        [RequiredRole(ClientRole.Read)]
         public QueueLengthResult Length(string idPattern)
         {
             try
@@ -280,17 +330,17 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                new QueueLengthResult().AddExceptionMessage(ex);
+                return new QueueLengthResult().AddExceptionMessage(ex, _logger);
             }
 
             return new QueueLengthResult(0);
         }
 
-        [HttpGet]
+        [HttpDelete]
         [Route("remove/{idPattern}")]
+        [RequiredRole(ClientRole.Write, patternRole: ClientRole.Admin)]
         async public Task<ApiResult> Remove(string idPattern, RemoveType removeType = RemoveType.Queue)
         {
-
             try
             {
                 if (_queues.AnyQueueExists(idPattern))
@@ -333,15 +383,16 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                new ApiResult().AddExceptionMessage(ex);
+                return new ApiResult().AddExceptionMessage(ex, _logger);
             }
 
             return new ApiResult(0);
         }
 
-        [HttpGet]
+        [HttpPut]
         [Route("register/{idPattern}")]
-        public QueuePropertiesResult Register(
+        [RequiredRole(ClientRole.Write, patternRole: ClientRole.Admin)]
+        async public Task<QueuePropertiesResult> Register(
                              string idPattern,
                              int? lifetimeSeconds = null,
                              int? itemLifetimeSeconds = null,
@@ -365,7 +416,10 @@ namespace MessageQueueNET.Controllers
                     queue.Properties.SuspendEnqueue = suspendEnqueue.GetValueOrDefault(queue.Properties.SuspendEnqueue);
                     queue.Properties.SuspendDequeue = suspendDequeue.GetValueOrDefault(queue.Properties.SuspendDequeue);
 
-                    _persist.PersistQueueProperties(queue);
+                    if (!await _persist.PersistQueueProperties(queue))
+                    {
+                        throw new Exception($"Error when persisting properties of queue {queue.Name}");
+                    }
                 }
 
                 queues.SetModified();
@@ -374,12 +428,13 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new QueuePropertiesResult().AddExceptionMessage(ex);
+                return new QueuePropertiesResult().AddExceptionMessage(ex, _logger);
             }
         }
 
         [HttpGet]
         [Route("properties/{idPattern}")]
+        [RequiredRole(ClientRole.Read)]
         public QueuePropertiesResult QueueProperties(string idPattern)
         {
             try
@@ -426,7 +481,7 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new QueuePropertiesResult().AddExceptionMessage(ex);
+                return new QueuePropertiesResult().AddExceptionMessage(ex, _logger);
             }
 
 
@@ -435,6 +490,7 @@ namespace MessageQueueNET.Controllers
 
         [HttpGet]
         [Route("queuenames")]
+        [RequiredRole(ClientRole.Read)]
         public QueueNamesResult QueueNames()
         {
             try
@@ -443,7 +499,7 @@ namespace MessageQueueNET.Controllers
             }
             catch (Exception ex)
             {
-                return new QueueNamesResult().AddExceptionMessage(ex);
+                return new QueueNamesResult().AddExceptionMessage(ex, _logger);
             }
         }
     }

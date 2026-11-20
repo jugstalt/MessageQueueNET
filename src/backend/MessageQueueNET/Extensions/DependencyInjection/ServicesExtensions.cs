@@ -26,6 +26,9 @@ namespace MessageQueueNET.Extensions.DependencyInjection
 
         static public IServiceCollection AddQueuesService(this IServiceCollection services)
         {
+            services.AddOptions<MessageQueueLimitsOptions>()
+                    .BindConfiguration("MessageQueue:Limits");
+
             return services.AddSingleton<QueuesService>();
         }
 

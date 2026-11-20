@@ -39,12 +39,16 @@ app.MapDefaultEndpoints();
 startup.Configure(
         app, 
         builder.Environment,
-        app.Services.GetRequiredService<RestorePersistedQueuesService>(),
         app.Services.GetRequiredService<IMessageQueueApiVersionService>()
      );
+
+await app.Services.GetRequiredService<RestorePersistedQueuesService>().Restore();
 
 app.LogStartupInformation(
         builder,
         app.Services.GetRequiredService<ILogger<Startup>>()
-   )
-   .Run();
+   );
+
+await app.RunAsync();
+
+public partial class Program { }

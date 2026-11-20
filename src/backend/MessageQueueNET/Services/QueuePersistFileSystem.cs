@@ -1,3 +1,4 @@
+using MessageQueueNET.Extensions;
 ﻿using MessageQueueNET.Models;
 using MessageQueueNET.Services.Abstraction;
 using Microsoft.Extensions.Options;
@@ -12,12 +13,48 @@ namespace MessageQueueNET.Services
     public class QueuePersistFileSystem : IQueuesPersistService
     {
         private const string QueuePropertiesFilename = "_queue.properties.json";
-        private readonly QueuePersistFileSystemOptions _options;
+        private const string UnconfirmedFolder = "_unconfirmed";
+        private readonly string _rootPath;
 
         public QueuePersistFileSystem(IOptionsMonitor<QueuePersistFileSystemOptions> optionsMonitor)
         {
-            _options = optionsMonitor.CurrentValue;
+            var rootPath = optionsMonitor.CurrentValue.RootPath;
+            _rootPath = Path.GetFullPath(String.IsNullOrWhiteSpace(rootPath) ? "." : rootPath);
         }
+
+        #region Path Helper
+
+        private static string ItemFilename(Guid itemId) => $"{itemId.ToString().ToLower()}.json";
+
+        // Every path is built here: the queue name is validated and the result must stay inside the root path
+        private string QueuePath(string queueName, params string[] parts)
+        {
+            if (!queueName.IsValidQueueName())
+            {
+                throw new ArgumentException($"Invalid queue name: {queueName}");
+            }
+
+            var queueRoot = Path.GetFullPath(Path.Combine(_rootPath, queueName));
+            var fullPath = Path.GetFullPath(Path.Combine([queueRoot, .. parts]));
+
+            if (!IsInside(queueRoot, _rootPath) || !(fullPath == queueRoot || IsInside(fullPath, queueRoot)))
+            {
+                throw new ArgumentException($"Invalid path for queue: {queueName}");
+            }
+
+            return fullPath;
+        }
+
+        private static bool IsInside(string path, string parent)
+        {
+            var parentWithSeparator = parent.EndsWith(Path.DirectorySeparatorChar)
+                ? parent
+                : parent + Path.DirectorySeparatorChar;
+
+            return path.StartsWith(parentWithSeparator, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+
+        #endregion
 
         #region IQueuePersist
 
@@ -27,7 +64,7 @@ namespace MessageQueueNET.Services
             {
                 if (queue?.Properties != null)
                 {
-                    FileInfo fi = new FileInfo(Path.Combine(_options.RootPath, queue.Name, QueuePropertiesFilename));
+                    FileInfo fi = new FileInfo(QueuePath(queue.Name, QueuePropertiesFilename));
 
                     if (!fi.Directory!.Exists)
                     {
@@ -50,7 +87,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                FileInfo fi = new FileInfo(Path.Combine(_options.RootPath, queueName, QueuePropertiesFilename));
+                FileInfo fi = new FileInfo(QueuePath(queueName, QueuePropertiesFilename));
                 if (fi.Exists)
                 {
                     var jsonString = await File.ReadAllTextAsync(fi.FullName);
@@ -64,7 +101,7 @@ namespace MessageQueueNET.Services
         async public Task<IEnumerable<QueueItem>> GetAllItems(string queueName)
         {
             var result = new List<QueueItem>();
-            DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName));
+            DirectoryInfo di = new DirectoryInfo(QueuePath(queueName));
 
             if (di.Exists)
             {
@@ -85,7 +122,7 @@ namespace MessageQueueNET.Services
         async public Task<IEnumerable<QueueItem>> GetAllUnconfirmedItems(string queueName)
         {
             var result = new List<QueueItem>();
-            DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName, "_unconfirmed"));
+            DirectoryInfo di = new DirectoryInfo(QueuePath(queueName, UnconfirmedFolder));
 
             if (di.Exists)
             {
@@ -108,7 +145,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName));
+                DirectoryInfo di = new DirectoryInfo(QueuePath(queueName));
 
                 if (!di.Exists)
                 {
@@ -116,7 +153,7 @@ namespace MessageQueueNET.Services
                 }
 
                 var jsonString = JsonSerializer.Serialize(item);
-                await File.WriteAllTextAsync(Path.Combine(di.FullName, $"{item.Id.ToString().ToLower()}.json"), jsonString);
+                await File.WriteAllTextAsync(Path.Combine(di.FullName, ItemFilename(item.Id)), jsonString);
 
                 return true;
             }
@@ -132,7 +169,7 @@ namespace MessageQueueNET.Services
 
             try
             {
-                DirectoryInfo di = new DirectoryInfo(_options.RootPath);
+                DirectoryInfo di = new DirectoryInfo(_rootPath);
                 foreach (var queueDirectory in di.GetDirectories())
                 {
                     queueNames.Add(queueDirectory.Name);
@@ -147,7 +184,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName));
+                DirectoryInfo di = new DirectoryInfo(QueuePath(queueName));
                 if (di.Exists)
                 {
                     di.Delete(true);
@@ -165,7 +202,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName));
+                DirectoryInfo di = new DirectoryInfo(QueuePath(queueName));
                 if (di.Exists)
                 {
                     foreach (var fi in di.GetFiles())
@@ -190,7 +227,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName, "_unconfirmed"));
+                DirectoryInfo di = new DirectoryInfo(QueuePath(queueName, UnconfirmedFolder));
                 if (di.Exists)
                 {
                     foreach (var fi in di.GetFiles())
@@ -211,7 +248,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                FileInfo fi = new FileInfo(Path.Combine(_options.RootPath, queueName, $"{itemId.ToString().ToLower()}.json"));
+                FileInfo fi = new FileInfo(QueuePath(queueName, ItemFilename(itemId)));
                 if (fi.Exists)
                 {
                     fi.Delete();
@@ -229,7 +266,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                DirectoryInfo di = new DirectoryInfo(Path.Combine(_options.RootPath, queueName, "_unconfirmed"));
+                DirectoryInfo di = new DirectoryInfo(QueuePath(queueName, UnconfirmedFolder));
 
                 if (!di.Exists)
                 {
@@ -237,7 +274,7 @@ namespace MessageQueueNET.Services
                 }
 
                 var jsonString = JsonSerializer.Serialize(item);
-                await File.WriteAllTextAsync(Path.Combine(di.FullName, $"{item.Id.ToString().ToLower()}.json"), jsonString);
+                await File.WriteAllTextAsync(Path.Combine(di.FullName, ItemFilename(item.Id)), jsonString);
 
                 return true;
             }
@@ -251,7 +288,7 @@ namespace MessageQueueNET.Services
         {
             try
             {
-                FileInfo fi = new FileInfo(Path.Combine(_options.RootPath, queueName, "_unconfirmed", $"{itemId.ToString().ToLower()}.json"));
+                FileInfo fi = new FileInfo(QueuePath(queueName, UnconfirmedFolder, ItemFilename(itemId)));
                 if (fi.Exists)
                 {
                     fi.Delete();
