@@ -31,8 +31,11 @@ class Build : NukeBuild
     [Parameter("NuGet API key (in CI a short-lived key from NuGet trusted publishing)"), Secret]
     readonly string NuGetApiKey;
 
-    [PathVariable("docker")]
-    readonly Tool Docker;
+    [Parameter("Container CLI with docker compatible build/push commands (e.g. 'wslc', 'podman') - Default is 'docker'")]
+    readonly string ContainerCli = "docker";
+
+    Tool _containerTool;
+    Tool Docker => _containerTool ??= ToolResolver.GetPathTool(ContainerCli);
 
     static readonly string[] ZipRuntimes = ["win-x64", "linux-x64"];
     const string DockerRuntime = "linux-musl-x64";
@@ -193,7 +196,8 @@ class Build : NukeBuild
                 PublishWebApp(project, DockerRuntime, context / "app");
 
                 var tags = ImageTags(image).ToArray();
-                Docker($"build --pull {string.Join(' ', tags.Select(t => $"-t {t}"))} {context}");
+                var tagArgs = string.Join(' ', tags.Select(t => $"--tag {t}"));
+                Docker($"build --pull {tagArgs:nq} {context}");
                 Log.Information("Built {Tags}", tags);
             }
         });

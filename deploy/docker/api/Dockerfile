@@ -16,6 +16,8 @@ COPY app/ .
 COPY override/ .
 
 # default persist location (writable for the non-root user, also as volume mount point)
+# used by the first start setup instead of /etc/message-queue
+ENV MESSAGEQUEUE_DATA_PATH=/home/app/messagequeue
 RUN mkdir -p /home/app/messagequeue && chown -R $APP_UID /home/app/messagequeue
 
 USER $APP_UID

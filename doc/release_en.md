@@ -21,7 +21,7 @@ Requires the .NET 10 SDK (and Docker for the image targets).
 | `Test` | Runs the tests | `artifacts/test-results/*.trx` |
 | `Pack` | Creates the NuGet packages | `artifacts/packages/*.nupkg, *.snupkg` |
 | `Zip` | Publishes API, dashboard and command line tools for `win-x64` and `linux-x64` | `artifacts/zip/messagequeue_net_<version>_<rid>.zip` |
-| `DockerBuild` | Builds the Docker images (`linux-musl-x64`) | local images `ghcr.io/jugstalt/...` |
+| `DockerBuild` | Builds the Docker images (`linux-musl-x64`); use `--container-cli wslc` (or `podman`) instead of Docker | local images `ghcr.io/jugstalt/...` |
 | `ReleaseNotes` | Extracts the section of the current version from `CHANGELOG.md` | `artifacts/release-notes.md` |
 | `NuGetPush` | Pushes the packages (`--nuget-api-key` required) | |
 | `DockerPush` | Pushes the images | |
