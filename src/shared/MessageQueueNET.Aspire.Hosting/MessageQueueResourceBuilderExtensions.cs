@@ -25,7 +25,7 @@ static public class MessageQueueResourceBuilderExtensions
                         ResourceAnnotationMutationBehavior.Replace)
                     .WithEnvironment(e =>
                     {
-                        e.EnvironmentVariables.Add("SWAGGERUI", "true");
+                        e.EnvironmentVariables.Add("OPENAPIUI", "true");
                         e.EnvironmentVariables.Add("MESSAGEQUEUE__PERSIST__TYPE", "filesystem");
                         e.EnvironmentVariables.Add("MESSAGEQUEUE__PERSIST__ROOTPATH", "/home/app/messagequeue/persist");
 

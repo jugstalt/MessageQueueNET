@@ -9,8 +9,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.OpenApi;
+using Scalar.AspNetCore;
 using System;
+using System.Threading.Tasks;
 
 namespace MessageQueueNET
 {
@@ -35,9 +36,14 @@ namespace MessageQueueNET
                             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
                     });
 
-            services.AddSwaggerGen(c =>
+            services.AddOpenApi(options =>
             {
-                c.SwaggerDoc("v2", new OpenApiInfo { Title = "MessageQueue.NET", Version = "v2" });
+                options.AddDocumentTransformer((document, context, cancellationToken) =>
+                {
+                    document.Info.Title = "MessageQueue.NET";
+                    document.Info.Version = context.ApplicationServices.GetRequiredService<IMessageQueueApiVersionService>().Version.ToString();
+                    return Task.CompletedTask;
+                });
             });
 
             services.AddQueuesService();
@@ -75,17 +81,12 @@ namespace MessageQueueNET
 
             bool basicAuthentication = BasicAuthenticationMiddleware.IsEnabled(Configuration);
 
-            // authentication first => nothing (swagger, long polling, queue access) runs for anonymous requests
+            // authentication first => nothing (openapi/scalar, long polling, queue access) runs for anonymous requests
             if (basicAuthentication)
             {
                 app.UseMiddleware<BasicAuthenticationMiddleware>();
             }
 
-            if (env.IsDevelopment() || "true".Equals(Configuration["swaggerUI"], StringComparison.OrdinalIgnoreCase))
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI(c => c.SwaggerEndpoint("../swagger/v2/swagger.json", $"MessageQueue.NET v{appVersion.Version}"));
-            }
 
             //app.UseHttpsRedirection();
 
@@ -101,7 +102,17 @@ namespace MessageQueueNET
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
+
+                if (env.IsDevelopment() || IsOpenApiUIEnabled())
+                {
+                    endpoints.MapOpenApi();
+                    endpoints.MapScalarApiReference(options => options.WithTitle($"MessageQueue.NET v{appVersion.Version}"));
+                }
             });
         }
+
+        // "swaggerUI" is the legacy (v3) name of the "openApiUI" setting
+        private bool IsOpenApiUIEnabled()
+            => "true".Equals(Configuration["openApiUI"] ?? Configuration["swaggerUI"], StringComparison.OrdinalIgnoreCase);
     }
 }

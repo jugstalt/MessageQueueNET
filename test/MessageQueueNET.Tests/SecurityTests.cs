@@ -104,13 +104,14 @@ public class SecurityTests
     }
 
     [Fact]
-    public async Task SwaggerAndInfo_RequireAuthentication()
+    public async Task OpenApiAndInfo_RequireAuthentication()
     {
         using var factory = CreateWithAuth();
         var anonymous = factory.CreateClient();
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/info")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/swagger/v2/swagger.json")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/openapi/v1.json")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/scalar")).StatusCode);
     }
 
     [Fact]
