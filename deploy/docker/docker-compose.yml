@@ -3,6 +3,8 @@
 #   docker compose -f deploy/docker/docker-compose.yml up -d
 #
 # Set MQ_TAG to use a specific version (default: latest).
+# Local images: build them first with "./build.ps1 DockerBuild" (tags the local build also as latest).
+# Images built with "--container-cli wslc" are not visible to docker compose (separate image store).
 
 services:
   messagequeue:

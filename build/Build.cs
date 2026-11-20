@@ -195,7 +195,14 @@ class Build : NukeBuild
                 CopyDirectory(DeployDirectory / "docker" / name, context);
                 PublishWebApp(project, DockerRuntime, context / "app");
 
-                var tags = ImageTags(image).ToArray();
+                var tags = ImageTags(image).ToList();
+                // local pre-release builds also get 'latest' so docker-compose.yml runs them; never pushed
+                var latest = $"{ContainerRegistry.TrimEnd('/')}/{image}:latest";
+                if (IsLocalBuild && !tags.Contains(latest))
+                {
+                    tags.Add(latest);
+                }
+
                 var tagArgs = string.Join(' ', tags.Select(t => $"--tag {t}"));
                 Docker($"build --pull {tagArgs:nq} {context}", logger: LogContainerOutput);
                 Log.Information("Built {Tags}", tags);
