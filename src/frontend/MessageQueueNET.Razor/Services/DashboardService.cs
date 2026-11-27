@@ -30,7 +30,23 @@ internal class DashboardService
 
     public string SelectedServerName { get; private set; }
     public string? SelectedServerFilter => _options.Queues?.FirstOrDefault(q => q.Name == SelectedServerName)?.Filter;
-    public string? SelectedServerUrl => _options.Queues?.FirstOrDefault(q => q.Name == SelectedServerName)?.Url;
+    // only for display: never show the client secret of the configured url (https://clientId:secret@host)
+    public string? SelectedServerUrl => MaskCredentials(_options.Queues?.FirstOrDefault(q => q.Name == SelectedServerName)?.Url);
+
+    internal static string? MaskCredentials(string? url)
+    {
+        if (String.IsNullOrEmpty(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || String.IsNullOrEmpty(uri.UserInfo))
+        {
+            return url;
+        }
+
+        var user = uri.UserInfo.Split(':', 2)[0];
+        var builder = new UriBuilder(uri) { UserName = user, Password = "***" };
+
+        // UriBuilder escapes '*'; keep the masked part readable
+        return builder.Uri.GetComponents(UriComponents.AbsoluteUri, UriFormat.Unescaped)
+            .Replace("%2A%2A%2A", "***");
+    }
 
     async public Task SetSelectedServerName(string serverName)
     {

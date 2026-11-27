@@ -10,10 +10,15 @@ namespace MessageQueueNET.Client.Services
 
         public MessageQueueApiVersionService()
         {
-            _version = Assembly
-                .GetAssembly(typeof(QueueClient))!
-                .GetName()!
-                .Version!;
+            var assembly = Assembly.GetAssembly(typeof(QueueClient))!;
+
+            // The version comes from the git tag (MinVer). MinVer sets AssemblyVersion to major.0.0.0 only
+            // (binding compatibility), the file version is major.minor.patch.0 => use the file version.
+            var fileVersion = assembly.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version;
+
+            _version = Version.TryParse(fileVersion, out var version)
+                ? version
+                : assembly.GetName().Version!;
         }
 
         public Version Version => _version;

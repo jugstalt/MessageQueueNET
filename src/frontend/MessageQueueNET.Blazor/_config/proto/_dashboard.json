@@ -1,0 +1,12 @@
+{
+  "dashboard": {
+    "Queues": [
+      {
+        "Name": "localhost",
+        "Url": "http://localhost:9091",
+        "Filter": "*"
+      }
+    ],
+    "MaxPollingSeconds": 10
+  }
+}

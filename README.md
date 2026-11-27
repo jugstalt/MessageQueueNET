@@ -1,9 +1,9 @@
-# MessageQueue.NET
+﻿# MessageQueue.NET
 
 [![CI](https://github.com/jugstalt/MessageQueueNET/actions/workflows/ci.yml/badge.svg)](https://github.com/jugstalt/MessageQueueNET/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/MessageQueueNET.Client?label=MessageQueueNET.Client&logo=nuget)](https://www.nuget.org/packages/MessageQueueNET.Client/)
 [![Docker](https://img.shields.io/badge/ghcr.io-messagequeue--net-2496ED?logo=docker&logoColor=white)](https://github.com/jugstalt/MessageQueueNET/pkgs/container/messagequeue-net)
-[![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-11-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/github/license/jugstalt/MessageQueueNET)](https://github.com/jugstalt/MessageQueueNET/blob/master/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-docs.gviewonline.com-blue)](https://docs.gviewonline.com/other/messagequeue-net/index.html)
 

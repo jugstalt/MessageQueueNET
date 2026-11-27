@@ -1,9 +1,10 @@
-# Runs MessageQueueNET API (http://localhost:9091) and dashboard (http://localhost:9090).
+﻿# MessageQueueNET REST API (http://localhost:9091) and dashboard (http://localhost:9090), minimal setup.
 #
-#   docker compose -f deploy/docker/docker-compose.yml up -d
+#   1. copy .env.example to .env (next to this file) and fill in the secrets, see the comments there
+#   2. docker compose -f deploy/docker/docker-compose.yml up -d
 #
-# Set MQ_TAG to use a specific version (default: latest).
-# Local images: build them first with "./build.ps1 DockerBuild" (tags the local build also as latest).
+# MQ_TAG selects the image version (default: latest).
+# Local images: build them first with ".\build.cmd DockerBuild" (local builds are also tagged latest).
 # Images built with "--container-cli wslc" are not visible to docker compose (separate image store).
 
 services:
@@ -11,11 +12,19 @@ services:
     image: ghcr.io/jugstalt/messagequeue-net:${MQ_TAG:-latest}
     container_name: messagequeue-net
     ports:
-      - "9091:8080"
+      - "${MQ_PORT:-9091}:8080"
     environment:
       MESSAGEQUEUE__PERSIST__TYPE: filesystem
       MESSAGEQUEUE__PERSIST__ROOTPATH: /home/app/messagequeue/persist
-      OPENAPIUI: "true"
+      OPENAPIUI: ${MQ_OPENAPIUI:-false}
+      # Basic authentication: one client for applications (write) and one for the dashboard
+      AUTHORIZATION__TYPE: Basic
+      AUTHORIZATION__CLIENTS__0__ID: ${MQ_APP_CLIENT_ID:-app}
+      AUTHORIZATION__CLIENTS__0__SECRET: ${MQ_APP_CLIENT_SECRET_HASH:?set MQ_APP_CLIENT_SECRET_HASH in .env}
+      AUTHORIZATION__CLIENTS__0__ROLES__0: write
+      AUTHORIZATION__CLIENTS__1__ID: ${MQ_DASHBOARD_CLIENT_ID:-dashboard}
+      AUTHORIZATION__CLIENTS__1__SECRET: ${MQ_DASHBOARD_CLIENT_SECRET_HASH:?set MQ_DASHBOARD_CLIENT_SECRET_HASH in .env}
+      AUTHORIZATION__CLIENTS__1__ROLES__0: ${MQ_DASHBOARD_ROLE:-read}
     volumes:
       - messagequeue-data:/home/app/messagequeue
     restart: unless-stopped
@@ -23,11 +32,12 @@ services:
   dashboard:
     image: ghcr.io/jugstalt/messagequeue-net-dashboard:${MQ_TAG:-latest}
     container_name: messagequeue-net-dashboard
+    # the dashboard has no login of its own: only reachable from this machine by default
     ports:
-      - "9090:8080"
+      - "${MQ_DASHBOARD_BIND:-127.0.0.1}:${MQ_DASHBOARD_PORT:-9090}:8080"
     environment:
-      DASHBOARD__QUEUES__0__NAME: dev
-      DASHBOARD__QUEUES__0__URL: http://messagequeue:8080
+      DASHBOARD__QUEUES__0__NAME: local
+      DASHBOARD__QUEUES__0__URL: http://${MQ_DASHBOARD_CLIENT_ID:-dashboard}:${MQ_DASHBOARD_CLIENT_SECRET:?set MQ_DASHBOARD_CLIENT_SECRET in .env}@messagequeue:8080
     depends_on:
       - messagequeue
     restart: unless-stopped

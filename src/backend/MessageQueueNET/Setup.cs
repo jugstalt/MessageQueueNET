@@ -138,8 +138,10 @@ namespace MessageQueueNET
         {
             if (SystemInfo.IsWindows)
             {
-                var fi = new FileInfo(configTemplateFile);
-                return $"{fi.Directory!.Parent!.Parent!.Parent!.Parent!.FullName}";
+                // ZIP layout: <install root>/<version>/api/app/_config/proto/_message-queue.json
+                // data next to the version folders (<install root>/data), so it survives an update to a new version folder
+                var versionFolder = new FileInfo(configTemplateFile).Directory!.Parent!.Parent!.Parent!.Parent!;
+                return (versionFolder.Parent ?? versionFolder).FullName;
             }
             else if (SystemInfo.IsLinux)
             {

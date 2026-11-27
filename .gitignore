@@ -366,3 +366,6 @@ FodyWeavers.xsd
 
 # MkDocs virtual environment
 .venv-docs/
+
+# docker compose secrets (deploy/docker/.env.example is the template)
+deploy/docker/.env

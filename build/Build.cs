@@ -37,6 +37,8 @@ class Build : NukeBuild
     [Parameter("Checkout of docs-gviewonline for DocsPublish - Default is the folder docs-gviewonline next to this repository")]
     readonly string DocsRepository;
 
+    const string RepositoryUrl = "https://github.com/jugstalt/MessageQueueNET";
+
     const string DocsFolder = "messagequeue-net";
 
     Tool _containerTool;
@@ -209,7 +211,8 @@ class Build : NukeBuild
                 }
 
                 var tagArgs = string.Join(' ', tags.Select(t => $"--tag {t}"));
-                Docker($"build --pull {tagArgs:nq} {context}", logger: LogContainerOutput);
+                // image.source links the package on ghcr.io to the repository (shown in the repository's sidebar)
+                Docker($"build --pull --label org.opencontainers.image.source={RepositoryUrl} --label org.opencontainers.image.version={Version} {tagArgs:nq} {context}", logger: LogContainerOutput);
                 Log.Information("Built {Tags}", tags);
             }
         });

@@ -15,46 +15,23 @@ Tags: `X.Y.Z`, `X.Y` and `latest` (preview versions only get their version tag).
 
 === "docker compose"
 
-    The repository contains a complete example in
-    [`deploy/docker/docker-compose.yml`](https://github.com/jugstalt/MessageQueueNET/blob/master/deploy/docker/docker-compose.yml):
+    [`deploy/docker/docker-compose.yml`](https://github.com/jugstalt/MessageQueueNET/blob/master/deploy/docker/docker-compose.yml) starts the REST API (port `9091`) with Basic
+    authentication and persisted queues, and the dashboard (port `9090`, only on `127.0.0.1`: it has no login of
+    its own). Two clients are configured: `app` (role `write`) for your applications and `dashboard` (role `read`).
 
-    ```yaml title="docker-compose.yml"
-    services:
-      messagequeue:
-        image: ghcr.io/jugstalt/messagequeue-net:${MQ_TAG:-latest}
-        ports:
-          - "9091:8080" # (1)!
-        environment:
-          MESSAGEQUEUE__PERSIST__TYPE: filesystem # (2)!
-          MESSAGEQUEUE__PERSIST__ROOTPATH: /home/app/messagequeue/persist
-          OPENAPIUI: "true" # (3)!
-        volumes:
-          - messagequeue-data:/home/app/messagequeue
-        restart: unless-stopped
+    1. Copy [`deploy/docker/.env.example`](https://github.com/jugstalt/MessageQueueNET/blob/master/deploy/docker/.env.example) to `deploy/docker/.env` (ignored by git) and fill in the
+       secrets. The comments in the file show how to create a random secret and its `sha256:` hash.
+       `MQ_DASHBOARD_CLIENT_SECRET` (plain text, the dashboard sends it) and `MQ_DASHBOARD_CLIENT_SECRET_HASH`
+       (stored by the server) must belong together.
+    2. Start:
 
-      dashboard:
-        image: ghcr.io/jugstalt/messagequeue-net-dashboard:${MQ_TAG:-latest}
-        ports:
-          - "9090:8080"
-        environment:
-          DASHBOARD__QUEUES__0__NAME: dev # (4)!
-          DASHBOARD__QUEUES__0__URL: http://messagequeue:8080
-        depends_on:
-          - messagequeue
-        restart: unless-stopped
+        ```bash
+        docker compose -f deploy/docker/docker-compose.yml up -d
+        ```
 
-    volumes:
-      messagequeue-data:
-    ```
-
-    1. The REST API is available at `http://localhost:9091`.
-    2. Keep the queues on disk, so they survive a restart. Without it, queues only live in memory.
-    3. Enables `/openapi/v1.json` and the Scalar UI at `/scalar`.
-    4. The dashboard can show several servers: `DASHBOARD__QUEUES__1__…` adds the next one.
-
-    ```bash
-    docker compose -f deploy/docker/docker-compose.yml up -d
-    ```
+    Applications connect with `http://app:<secret>@<host>:9091`. `MQ_DASHBOARD_ROLE=write` or `admin` lets the
+    dashboard create, suspend and delete queues; `MQ_OPENAPIUI=true` enables `/openapi/v1.json` and `/scalar`;
+    `MQ_TAG` selects the image version.
 
 === "docker run"
 
@@ -109,20 +86,24 @@ Every [GitHub release](https://github.com/jugstalt/MessageQueueNET/releases) con
 and `linux-x64`. They require the [ASP.NET Core 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```text
-<version>/
-├── api/app/                                  # MessageQueueNET (REST API)
-├── dashboard/app/                            # MessageQueueNET.Blazor (dashboard)
-├── cmd/                                      # MessageQueueNET.Cmd, MessageQueueNET.Processor
-├── start-messagequeue(.bat|.sh)              # API on http://localhost:9091
-└── start-messagequeue-dashboard(.bat|.sh)    # dashboard on http://localhost:9090
+<install root>/                               # e.g. C:\apps\messagequeue
+├── data/persist/                             # persisted queues (Windows: created on the first start)
+└── <version>/                                # content of the ZIP
+    ├── api/app/                                  # MessageQueueNET (REST API)
+    ├── dashboard/app/                            # MessageQueueNET.Blazor (dashboard)
+    ├── cmd/                                      # MessageQueueNET.Cmd, MessageQueueNET.Processor
+    ├── start-messagequeue(.bat|.sh)              # API on http://localhost:9091
+    └── start-messagequeue-dashboard(.bat|.sh)    # dashboard on http://localhost:9090
 ```
 
 To run the API in *IIS*, point a website to `api/app` (with the
 [ASP.NET Core Hosting Bundle](https://learn.microsoft.com/aspnet/core/host-and-deploy/iis/hosting-bundle) installed).
 
 !!! note "Updates"
-    Put your settings into `_config/message-queue.json` (API) and `_config/dashboard.json` (dashboard).
-    To update, copy everything except the `_config` folder over the existing installation.
+    Unpack the ZIP into a folder like `C:\apps\messagequeue`; on the first start on Windows the API stores the
+    queues in `data/persist` next to the version folders (`C:\apps\messagequeue\data\persist`), so they survive
+    an update. Put your settings into `_config/message-queue.json` (API) and `_config/dashboard.json` (dashboard).
+    To update, unpack the new version next to the old one and copy both `_config` folders into it.
 
 ## Dashboard
 
@@ -140,6 +121,9 @@ variables (`DASHBOARD__…`):
   }
 }
 ```
+
+On the first start without any configured server (e.g. from the ZIP download), the dashboard creates
+`_config/dashboard.json` with the REST API on `http://localhost:9091`. Edit this file for your servers.
 
 | Setting | Description |
 |---|---|
